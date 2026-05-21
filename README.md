@@ -72,6 +72,7 @@ The default Codex-only flow intentionally prevents agents from seeing each other
 - The broker stores a diff-based `implementation_brief`; `tester` does not see implementer output or intent.
 - `tester` sees task brief plus broker implementation brief and validates independently.
 - `verifier` sees broker artifacts and command evidence, not private raw agent logs.
+<<<<<<< HEAD
 
 ## Unity Worktree Flow
 
@@ -152,3 +153,5 @@ Commit these shared documents:
 - `docs/task-reports/*.md` for task reports that can also be mirrored to Notion.
 
 Do not commit `.data/`, `.harness/`, `.env.local`, raw shell logs, or raw unredacted agent logs.
+=======
+>>>>>>> 481dbfda0daa631f81c965799245dcbe3eac49a1
