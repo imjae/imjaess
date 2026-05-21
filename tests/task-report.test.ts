@@ -6,6 +6,8 @@ describe("taskReportMarkdown", () => {
   it("uses broker artifacts and verifier decisions for the shared report", () => {
     const task: TaskDetail = {
       id: "task-1",
+      parentTaskId: null,
+      taskGroup: "Game Logic",
       title: "Fix inventory",
       goal: "Fix the inventory bug.",
       scope: "Keep UI changes narrow.",
@@ -18,6 +20,18 @@ describe("taskReportMarkdown", () => {
       failureReason: null,
       createdAt: "2026-05-21T00:00:00.000Z",
       updatedAt: "2026-05-21T00:01:00.000Z",
+      childTasks: [],
+      attachments: [
+        {
+          id: "attachment-1",
+          taskId: "task-1",
+          originalName: "effect.png",
+          storedPath: "C:\\tmp\\effect.png",
+          mimeType: "image/png",
+          sizeBytes: 2048,
+          createdAt: "2026-05-21T00:00:30.000Z"
+        }
+      ],
       agentRuns: [
         {
           id: "run-1",
@@ -33,6 +47,8 @@ describe("taskReportMarkdown", () => {
           outputChars: 200,
           wasTrimmed: false,
           timedOut: false,
+          workspacePath: "D:\\dev\\Deluge\\.harness\\worktrees\\task-1\\r1-researcher",
+          branchName: "harness/task-1/researcher/r1",
           input: "private input",
           output: "private raw output",
           error: null,
@@ -69,6 +85,8 @@ describe("taskReportMarkdown", () => {
 
     const markdown = taskReportMarkdown(task);
     expect(markdown).toContain("# Task: Fix inventory");
+    expect(markdown).toContain("Group: Game Logic");
+    expect(markdown).toContain("effect.png");
     expect(markdown).toContain("Approved evidence");
     expect(markdown).toContain("Passed verification.");
     expect(markdown).not.toContain("private raw output");

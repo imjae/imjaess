@@ -10,6 +10,7 @@ import {
   FolderOpen,
   Gauge,
   GitBranch,
+  ImageIcon,
   NotebookTabs,
   ListChecks,
   Play,
@@ -20,7 +21,9 @@ import {
   ShieldCheck,
   ShieldQuestion,
   SlidersHorizontal,
-  TerminalSquare
+  TerminalSquare,
+  Trash2,
+  Upload
 } from "lucide-react";
 import type {
   AgentRun,
@@ -29,14 +32,190 @@ import type {
   ConventionNote,
   ShellLog,
   Task,
+  TaskAttachment,
   TaskDetail,
   Verification
 } from "@/lib/types";
 import type { ModelOption } from "@/lib/model-catalog";
 
 type Tab = "agents" | "artifacts" | "shell" | "verifications" | "conventions";
+type UiLanguage = "ko" | "en";
 
 const defaultProjectPath = "D:\\dev\\Deluge";
+const LANGUAGE_STORAGE_KEY = "oh-my-codex-language";
+
+const UI_TEXT = {
+  en: {
+    active: "Active",
+    addRule: "Add Rule",
+    agentSettings: "Agent Settings",
+    agentsTab: "Agents",
+    all: "All",
+    artifactsTab: "Broker",
+    attachments: "Attachments",
+    blocked: "Blocked",
+    browseFolders: "Browse folders",
+    category: "Category",
+    close: "Close",
+    confidence: "Confidence",
+    conventionNotes: "Convention notes",
+    conventionsTab: "Unity Rules",
+    createAndQueue: "Create and Queue",
+    createFollowUpTask: "Create Follow-up Task",
+    done: "Done",
+    dropImages: "Drop images here or click to attach",
+    examples: "Examples",
+    exportPreview: "Export preview",
+    followUp: "Follow-up",
+    followUpOfTask: "Follow-up of task",
+    followUpPlaceholder: "Ask a follow-up without reusing the full raw task context. A child task will be created.",
+    followUpTasks: "Follow-up Tasks",
+    goal: "Goal",
+    grantCli: "Grant task-level CLI permission",
+    imageLimit: "PNG, JPG, WEBP, GIF up to 12 MB each",
+    insertSelectedPath: "Enter/Tab inserts selected path",
+    language: "Language",
+    loadingFolders: "Loading folders...",
+    localOnly: "localhost only / CLI through local worker",
+    newTask: "New Task",
+    noBrokerArtifacts: "No broker artifacts recorded yet.",
+    noChildFolders: "No child folders.",
+    noGroup: "No group",
+    noImages: "No images attached yet.",
+    noMatchingPaths: "No matching files or folders",
+    noShellCommands: "No shell commands have been run.",
+    noAgentRuns: "No agent runs recorded yet.",
+    noTasksInGroup: "No tasks in this group.",
+    noTasksYet: "No tasks yet.",
+    noUnityNotes: "No Unity convention notes for this project.",
+    noVerifierDecisions: "No verifier decisions yet.",
+    notionParentPageId: "Parent page ID",
+    notionPlaceholder: "Notion page ID to create task pages under",
+    notionSync: "Notion Sync",
+    onlyImages: "Only image files can be attached.",
+    parallelTasks: "Parallel Tasks",
+    pendingImages: "Images to attach when this task starts",
+    previewExport: "Preview Export",
+    reason: "Reason",
+    refreshTasks: "Refresh tasks",
+    round: "Round",
+    rule: "Rule",
+    run: "Run",
+    saveNotionSettings: "Save Notion Settings",
+    saveSettings: "Save Settings",
+    scope: "Scope",
+    scopeDropImages: "Drop startup images here or click to attach",
+    scopePlaceholder: "Files, folders, and constraints. Type @ to search inside Target project path.",
+    scopeSuggestions: "Scope path suggestions",
+    searchingTarget: "Searching target project...",
+    selectTaskEmpty: "Select a task to inspect agent output and verifier decisions.",
+    selectTargetFolder: "Select Target Folder",
+    selectThisFolder: "Select This Folder",
+    settings: "Settings",
+    shellTab: "Shell",
+    syncNotion: "Sync Notion",
+    taskDetail: "Task Detail",
+    taskGroup: "Task Group",
+    taskGroups: "Task groups",
+    targetProjectPath: "Target project path",
+    title: "Title",
+    tokenConfigured: "configured",
+    tokenMissing: "missing NOTION_TOKEN in .env.local",
+    ungrouped: "Ungrouped",
+    uploadImages: "Uploading images...",
+    verificationCommand: "Verification command",
+    verificationsTab: "Verifier",
+    writeAgents: "Write AGENTS.md"
+  },
+  ko: {
+    active: "진행 중",
+    addRule: "규칙 추가",
+    agentSettings: "Agent 설정",
+    agentsTab: "Agent",
+    all: "전체",
+    artifactsTab: "브로커",
+    attachments: "첨부 이미지",
+    blocked: "차단됨",
+    browseFolders: "폴더 찾기",
+    category: "분류",
+    close: "닫기",
+    confidence: "신뢰도",
+    conventionNotes: "컨벤션 노트",
+    conventionsTab: "Unity 규칙",
+    createAndQueue: "생성하고 대기열에 추가",
+    createFollowUpTask: "후속 Task 생성",
+    done: "완료",
+    dropImages: "이미지를 드롭하거나 클릭해서 첨부",
+    examples: "예시",
+    exportPreview: "내보내기 미리보기",
+    followUp: "후속 작업",
+    followUpOfTask: "상위 Task",
+    followUpPlaceholder: "전체 원본 컨텍스트를 재사용하지 않고 이어서 요청합니다. 자식 Task가 생성됩니다.",
+    followUpTasks: "후속 Task",
+    goal: "목표",
+    grantCli: "Task 단위 CLI 권한 부여",
+    imageLimit: "PNG, JPG, WEBP, GIF, 파일당 최대 12 MB",
+    insertSelectedPath: "Enter/Tab으로 선택 경로 입력",
+    language: "언어",
+    loadingFolders: "폴더를 불러오는 중...",
+    localOnly: "localhost 전용 / CLI는 로컬 worker가 실행",
+    newTask: "새 Task",
+    noBrokerArtifacts: "아직 브로커 산출물이 없습니다.",
+    noChildFolders: "하위 폴더가 없습니다.",
+    noGroup: "그룹 없음",
+    noImages: "아직 첨부된 이미지가 없습니다.",
+    noMatchingPaths: "일치하는 파일 또는 폴더가 없습니다.",
+    noShellCommands: "아직 실행된 shell 명령이 없습니다.",
+    noAgentRuns: "아직 agent 실행 기록이 없습니다.",
+    noTasksInGroup: "이 그룹에는 Task가 없습니다.",
+    noTasksYet: "아직 Task가 없습니다.",
+    noUnityNotes: "이 프로젝트의 Unity 컨벤션 노트가 없습니다.",
+    noVerifierDecisions: "아직 verifier 판정이 없습니다.",
+    notionParentPageId: "상위 페이지 ID",
+    notionPlaceholder: "Task 페이지를 생성할 Notion 페이지 ID",
+    notionSync: "Notion 동기화",
+    onlyImages: "이미지 파일만 첨부할 수 있습니다.",
+    parallelTasks: "병렬 Task",
+    pendingImages: "Task 시작 시 첨부할 이미지",
+    previewExport: "내보내기 미리보기",
+    reason: "이유",
+    refreshTasks: "Task 새로고침",
+    round: "라운드",
+    rule: "규칙",
+    run: "실행",
+    saveNotionSettings: "Notion 설정 저장",
+    saveSettings: "설정 저장",
+    scope: "범위",
+    scopeDropImages: "시작 시 사용할 이미지를 드롭하거나 클릭해서 첨부",
+    scopePlaceholder: "파일, 폴더, 제약 조건. @를 입력하면 Target project path 안에서 검색합니다.",
+    scopeSuggestions: "Scope 경로 추천",
+    searchingTarget: "대상 프로젝트 검색 중...",
+    selectTaskEmpty: "Agent 출력과 verifier 판정을 확인할 Task를 선택하세요.",
+    selectTargetFolder: "대상 폴더 선택",
+    selectThisFolder: "이 폴더 선택",
+    settings: "설정",
+    shellTab: "Shell",
+    syncNotion: "Notion 동기화",
+    taskDetail: "Task 상세",
+    taskGroup: "Task 그룹",
+    taskGroups: "Task 그룹",
+    targetProjectPath: "대상 프로젝트 경로",
+    title: "제목",
+    tokenConfigured: "설정됨",
+    tokenMissing: ".env.local에 NOTION_TOKEN 없음",
+    ungrouped: "그룹 없음",
+    uploadImages: "이미지 업로드 중...",
+    verificationCommand: "검증 명령",
+    verificationsTab: "Verifier",
+    writeAgents: "AGENTS.md 쓰기"
+  }
+} as const;
+
+type UiTextKey = keyof typeof UI_TEXT.en;
+
+function tr(language: UiLanguage, key: UiTextKey): string {
+  return UI_TEXT[language][key] || UI_TEXT.en[key];
+}
 type ModelCatalog = Record<AgentSetting["provider"], ModelOption[]>;
 type NotionSettings = {
   parentPageId: string;
@@ -53,6 +232,7 @@ type ScopeMention = {
   end: number;
   query: string;
 };
+type TaskGroupFilter = "__all__" | "__ungrouped__" | string;
 type FolderBrowserEntry = {
   name: string;
   path: string;
@@ -64,17 +244,50 @@ type FolderBrowserResult = {
   entries: FolderBrowserEntry[];
 };
 
-function statusLabel(status: Task["status"]): string {
-  const labels: Record<Task["status"], string> = {
-    queued: "Queued",
-    running: "Running",
-    reviewing: "Reviewing",
-    verifying: "Verifying",
-    needs_fix: "Needs Fix",
-    done: "Done",
-    blocked: "Blocked"
+function statusLabel(status: Task["status"], language: UiLanguage): string {
+  const labels: Record<UiLanguage, Record<Task["status"], string>> = {
+    en: {
+      queued: "Queued",
+      running: "Running",
+      reviewing: "Reviewing",
+      verifying: "Verifying",
+      needs_fix: "Needs Fix",
+      done: "Done",
+      blocked: "Blocked"
+    },
+    ko: {
+      queued: "대기",
+      running: "실행 중",
+      reviewing: "리뷰 중",
+      verifying: "검증 중",
+      needs_fix: "수정 필요",
+      done: "완료",
+      blocked: "차단됨"
+    }
   };
-  return labels[status];
+  return labels[language][status];
+}
+
+function taskGroupLabel(group: string, language: UiLanguage): string {
+  return group.trim() || tr(language, "ungrouped");
+}
+
+function confidenceLabel(confidence: ConventionNote["confidence"], language: UiLanguage): string {
+  const labels: Record<UiLanguage, Record<ConventionNote["confidence"], string>> = {
+    en: { low: "low", medium: "medium", high: "high" },
+    ko: { low: "낮음", medium: "보통", high: "높음" }
+  };
+  return labels[language][confidence];
+}
+
+function tabLabels(language: UiLanguage): Array<{ id: Tab; label: string; icon: React.ReactElement }> {
+  return [
+    { id: "agents", label: tr(language, "agentsTab"), icon: <Database size={15} aria-hidden="true" /> },
+    { id: "artifacts", label: tr(language, "artifactsTab"), icon: <ShieldQuestion size={15} aria-hidden="true" /> },
+    { id: "shell", label: tr(language, "shellTab"), icon: <TerminalSquare size={15} aria-hidden="true" /> },
+    { id: "verifications", label: tr(language, "verificationsTab"), icon: <ClipboardCheck size={15} aria-hidden="true" /> },
+    { id: "conventions", label: tr(language, "conventionsTab"), icon: <ScrollText size={15} aria-hidden="true" /> }
+  ];
 }
 
 function shortText(text: string, max = 120): string {
@@ -86,6 +299,10 @@ function tailPath(text: string, max = 54): string {
     return text;
   }
   return `...${text.slice(-(max - 3))}`;
+}
+
+function canDeleteTask(task: Task): boolean {
+  return task.status === "queued" || task.status === "done" || task.status === "blocked";
 }
 
 function activeScopeMention(value: string, cursor: number): ScopeMention | null {
@@ -117,15 +334,22 @@ async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
   return payload;
 }
 
+function isNotFoundError(error: unknown): boolean {
+  return error instanceof Error && error.message === "Task not found";
+}
+
 export default function HomePage(): React.ReactElement {
   const scopeInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const [language, setLanguage] = useState<UiLanguage>("ko");
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [taskGroups, setTaskGroups] = useState<string[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedTaskGroup, setSelectedTaskGroup] = useState<TaskGroupFilter>("__all__");
   const [taskDetail, setTaskDetail] = useState<TaskDetail | null>(null);
   const [tab, setTab] = useState<Tab>("agents");
   const [notes, setNotes] = useState<ConventionNote[]>([]);
   const [agentSettings, setAgentSettings] = useState<AgentSetting[]>([]);
-  const [modelCatalog, setModelCatalog] = useState<ModelCatalog>({ openai: [], mock: [] });
+  const [modelCatalog, setModelCatalog] = useState<ModelCatalog>({ openai: [], "codex-cli": [], mock: [] });
   const [notionSettings, setNotionSettings] = useState<NotionSettings>({
     parentPageId: "",
     updatedAt: null,
@@ -135,22 +359,27 @@ export default function HomePage(): React.ReactElement {
   const [isSavingSettings, setSavingSettings] = useState(false);
   const [isSavingNotion, setSavingNotion] = useState(false);
   const [isSyncingNotion, setSyncingNotion] = useState(false);
+  const [isUploadingAttachment, setUploadingAttachment] = useState(false);
   const [isSettingsOpen, setSettingsOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [exportPreview, setExportPreview] = useState<string>("");
   const [scopeMention, setScopeMention] = useState<ScopeMention | null>(null);
+  const [scopeImages, setScopeImages] = useState<File[]>([]);
   const [pathSuggestions, setPathSuggestions] = useState<PathSuggestion[]>([]);
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
   const [isLoadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [followUpMessage, setFollowUpMessage] = useState("");
+  const [isCreatingFollowUp, setCreatingFollowUp] = useState(false);
   const [isFolderBrowserOpen, setFolderBrowserOpen] = useState(false);
   const [isLoadingFolders, setLoadingFolders] = useState(false);
   const [folderBrowser, setFolderBrowser] = useState<FolderBrowserResult | null>(null);
   const [folderBrowserError, setFolderBrowserError] = useState<string | null>(null);
 
   const [taskForm, setTaskForm] = useState({
-    title: "Unity convention-safe task",
-    goal: "Investigate or implement a scoped Unity change with automatic review and verification.",
-    scope: "Keep edits inside the selected project and preserve Unity asset/meta conventions.",
+    title: "",
+    taskGroup: "",
+    goal: "",
+    scope: "",
     targetProjectPath: defaultProjectPath,
     verificationCommand: "dotnet build Deluge.sln --no-restore",
     agentPlan: "",
@@ -167,9 +396,26 @@ export default function HomePage(): React.ReactElement {
     examples: ""
   });
 
+  useEffect(() => {
+    const savedLanguage = window.localStorage.getItem(LANGUAGE_STORAGE_KEY);
+    if (savedLanguage === "ko" || savedLanguage === "en") {
+      setLanguage(savedLanguage);
+    }
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(LANGUAGE_STORAGE_KEY, language);
+  }, [language]);
+
   async function refreshTasks(): Promise<void> {
-    const data = await jsonFetch<{ tasks: Task[] }>("/api/tasks");
+    const data = await jsonFetch<{ tasks: Task[]; taskGroups: string[] }>("/api/tasks");
     setTasks(data.tasks);
+    setTaskGroups(data.taskGroups);
+    if (selectedTaskId && !data.tasks.some((task) => task.id === selectedTaskId)) {
+      setSelectedTaskId(data.tasks[0]?.id || null);
+      setTaskDetail(null);
+      return;
+    }
     if (!selectedTaskId && data.tasks[0]) {
       setSelectedTaskId(data.tasks[0].id);
     }
@@ -187,8 +433,17 @@ export default function HomePage(): React.ReactElement {
   }
 
   async function refreshDetail(taskId: string): Promise<void> {
-    const data = await jsonFetch<{ task: TaskDetail }>(`/api/tasks/${taskId}`);
-    setTaskDetail(data.task);
+    try {
+      const data = await jsonFetch<{ task: TaskDetail }>(`/api/tasks/${taskId}`);
+      setTaskDetail(data.task);
+    } catch (err) {
+      if (isNotFoundError(err)) {
+        setTaskDetail(null);
+        setSelectedTaskId((current) => (current === taskId ? null : current));
+        return;
+      }
+      throw err;
+    }
   }
 
   async function refreshNotes(projectPath = noteForm.projectPath): Promise<void> {
@@ -211,7 +466,11 @@ export default function HomePage(): React.ReactElement {
     void refreshDetail(selectedTaskId).catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
     const interval = window.setInterval(() => {
       void refreshTasks();
-      void refreshDetail(selectedTaskId);
+      void refreshDetail(selectedTaskId).catch((err: unknown) => {
+        if (!isNotFoundError(err)) {
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      });
     }, 1500);
     return () => window.clearInterval(interval);
   }, [selectedTaskId]);
@@ -270,17 +529,71 @@ export default function HomePage(): React.ReactElement {
     };
   }, [tasks, notes]);
 
+  const taskGroupCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const task of tasks) {
+      const group = task.taskGroup.trim();
+      if (group) {
+        counts.set(group, (counts.get(group) || 0) + 1);
+      }
+    }
+    return counts;
+  }, [tasks]);
+
+  const knownTaskGroups = useMemo(() => {
+    return Array.from(new Set([...taskGroups, ...tasks.map((task) => task.taskGroup.trim())].filter(Boolean))).sort((a, b) =>
+      a.localeCompare(b)
+    );
+  }, [taskGroups, tasks]);
+
+  const hasUngroupedTasks = useMemo(() => tasks.some((task) => !task.taskGroup.trim()), [tasks]);
+
+  const visibleTasks = useMemo(() => {
+    if (selectedTaskGroup === "__all__") {
+      return tasks;
+    }
+    if (selectedTaskGroup === "__ungrouped__") {
+      return tasks.filter((task) => !task.taskGroup.trim());
+    }
+    return tasks.filter((task) => task.taskGroup.trim() === selectedTaskGroup);
+  }, [selectedTaskGroup, tasks]);
+
+  useEffect(() => {
+    if (
+      selectedTaskGroup !== "__all__" &&
+      selectedTaskGroup !== "__ungrouped__" &&
+      !knownTaskGroups.includes(selectedTaskGroup)
+    ) {
+      setSelectedTaskGroup("__all__");
+    }
+    if (selectedTaskGroup === "__ungrouped__" && !hasUngroupedTasks) {
+      setSelectedTaskGroup("__all__");
+    }
+  }, [hasUngroupedTasks, knownTaskGroups, selectedTaskGroup]);
+
   async function submitTask(event: FormEvent): Promise<void> {
     event.preventDefault();
     setSubmitting(true);
     setError(null);
     try {
+      const shouldStartAfterImageUpload = taskForm.approvalGrant && scopeImages.length > 0;
       const data = await jsonFetch<{ task: Task }>("/api/tasks", {
         method: "POST",
-        body: JSON.stringify(taskForm)
+        body: JSON.stringify(shouldStartAfterImageUpload ? { ...taskForm, approvalGrant: false } : taskForm)
       });
+      if (scopeImages.length > 0) {
+        await uploadImagesToTask(data.task.id, scopeImages);
+        setScopeImages([]);
+      }
+      if (shouldStartAfterImageUpload) {
+        await jsonFetch(`/api/tasks/${data.task.id}/start`, { method: "POST" });
+      }
       setSelectedTaskId(data.task.id);
+      if (data.task.taskGroup.trim()) {
+        setSelectedTaskGroup(data.task.taskGroup.trim());
+      }
       await refreshTasks();
+      await refreshDetail(data.task.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -337,6 +650,20 @@ export default function HomePage(): React.ReactElement {
       setScopeMention(null);
       setPathSuggestions([]);
     }
+  }
+
+  function addScopeImages(files: File[]): void {
+    const imageFiles = files.filter((file) => file.type.startsWith("image/"));
+    if (imageFiles.length === 0) {
+      setError(tr(language, "onlyImages"));
+      return;
+    }
+    setError(null);
+    setScopeImages((current) => [...current, ...imageFiles]);
+  }
+
+  function removeScopeImage(index: number): void {
+    setScopeImages((current) => current.filter((_, itemIndex) => itemIndex !== index));
   }
 
   async function loadFolderBrowser(pathValue: string): Promise<void> {
@@ -410,7 +737,7 @@ export default function HomePage(): React.ReactElement {
     try {
       await jsonFetch("/api/notion/sync", {
         method: "POST",
-        body: JSON.stringify({ taskId: selectedTaskId })
+        body: JSON.stringify({ taskId: selectedTaskId, language })
       });
       await refreshDetail(selectedTaskId);
     } catch (err) {
@@ -427,6 +754,102 @@ export default function HomePage(): React.ReactElement {
     await jsonFetch(`/api/tasks/${selectedTaskId}/start`, { method: "POST" });
     await refreshTasks();
     await refreshDetail(selectedTaskId);
+  }
+
+  async function deleteSelectedTask(task: Task): Promise<void> {
+    if (!canDeleteTask(task)) {
+      setError("Running tasks cannot be deleted until they finish or block.");
+      return;
+    }
+    const confirmed = window.confirm(`Delete task "${task.title}" and its local run logs?`);
+    if (!confirmed) {
+      return;
+    }
+
+    setError(null);
+    try {
+      await jsonFetch(`/api/tasks/${task.id}`, { method: "DELETE" });
+      const remainingTasks = tasks.filter((item) => item.id !== task.id);
+      setTasks(remainingTasks);
+      if (selectedTaskId === task.id) {
+        const nextTask = remainingTasks[0] || null;
+        setSelectedTaskId(nextTask?.id || null);
+        setTaskDetail(null);
+        if (nextTask) {
+          await refreshDetail(nextTask.id);
+        }
+      }
+      await refreshTasks();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function createFollowUpForSelectedTask(event: FormEvent): Promise<void> {
+    event.preventDefault();
+    if (!selectedTaskId || !followUpMessage.trim()) {
+      return;
+    }
+
+    setCreatingFollowUp(true);
+    setError(null);
+    try {
+      const data = await jsonFetch<{ task: Task }>(`/api/tasks/${selectedTaskId}/follow-up`, {
+        method: "POST",
+        body: JSON.stringify({
+          message: followUpMessage,
+          approvalGrant: true,
+          verificationCommand: taskDetail?.targetProjectPath ? taskForm.verificationCommand : ""
+        })
+      });
+      setFollowUpMessage("");
+      setSelectedTaskId(data.task.id);
+      await refreshTasks();
+      await refreshDetail(data.task.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCreatingFollowUp(false);
+    }
+  }
+
+  async function uploadImagesToTask(taskId: string, files: File[]): Promise<void> {
+    const imageFiles = files.filter((file) => file.type.startsWith("image/"));
+    if (imageFiles.length === 0) {
+      setError(tr(language, "onlyImages"));
+      return;
+    }
+
+    const formData = new FormData();
+    for (const file of imageFiles) {
+      formData.append("images", file);
+    }
+
+    const response = await fetch(`/api/tasks/${taskId}/attachments`, {
+      method: "POST",
+      body: formData
+    });
+    const payload = (await response.json()) as { error?: string };
+    if (!response.ok) {
+      throw new Error(payload.error || `Upload failed: ${response.status}`);
+    }
+  }
+
+  async function uploadTaskImages(files: File[]): Promise<void> {
+    if (!selectedTaskId || files.length === 0) {
+      return;
+    }
+
+    setUploadingAttachment(true);
+    setError(null);
+    try {
+      await uploadImagesToTask(selectedTaskId, files);
+      await refreshDetail(selectedTaskId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setUploadingAttachment(false);
+    }
   }
 
   async function submitNote(event: FormEvent): Promise<void> {
@@ -463,17 +886,37 @@ export default function HomePage(): React.ReactElement {
           </div>
           <div>
             <h1>Local Multi-Agent Harness</h1>
-            <p>API agents, verifier loops, worktree isolation, Unity convention memory</p>
+            <p>
+              {language === "ko"
+                ? "API agent, 검증 루프, worktree 격리, Unity 컨벤션 메모리"
+                : "API agents, verifier loops, worktree isolation, Unity convention memory"}
+            </p>
           </div>
         </div>
         <div className="top-actions">
           <ShieldCheck size={16} aria-hidden="true" />
-          <span>localhost only / CLI through local worker</span>
-          <button className="btn" onClick={() => setSettingsOpen(true)} title="Settings">
+          <span>{tr(language, "localOnly")}</span>
+          <div className="language-toggle" aria-label={tr(language, "language")}>
+            <button
+              className={language === "ko" ? "active" : ""}
+              onClick={() => setLanguage("ko")}
+              type="button"
+            >
+              한국어
+            </button>
+            <button
+              className={language === "en" ? "active" : ""}
+              onClick={() => setLanguage("en")}
+              type="button"
+            >
+              English
+            </button>
+          </div>
+          <button className="btn" onClick={() => setSettingsOpen(true)} title={tr(language, "settings")}>
             <Settings size={16} aria-hidden="true" />
-            Settings
+            {tr(language, "settings")}
           </button>
-          <button className="btn" onClick={() => void refreshTasks()} title="Refresh tasks">
+          <button className="btn" onClick={() => void refreshTasks()} title={tr(language, "refreshTasks")}>
             <RefreshCw size={16} aria-hidden="true" />
           </button>
         </div>
@@ -485,13 +928,13 @@ export default function HomePage(): React.ReactElement {
             <div className="panel-header">
               <div className="panel-title">
                 <Plus size={18} aria-hidden="true" />
-                New Task
+                {tr(language, "newTask")}
               </div>
             </div>
             <div className="panel-body">
             <form className="form-grid" onSubmit={(event) => void submitTask(event)}>
               <div className="field">
-                <label htmlFor="title">Title</label>
+                <label htmlFor="title">{tr(language, "title")}</label>
                 <input
                   id="title"
                   value={taskForm.title}
@@ -499,7 +942,35 @@ export default function HomePage(): React.ReactElement {
                 />
               </div>
               <div className="field">
-                <label htmlFor="goal">Goal</label>
+                <label htmlFor="task-group">{tr(language, "taskGroup")}</label>
+                <input
+                  id="task-group"
+                  value={taskForm.taskGroup}
+                  onChange={(event) => setTaskForm({ ...taskForm, taskGroup: event.target.value })}
+                />
+                <div className="task-tag-picker" aria-label={tr(language, "taskGroups")}>
+                  <button
+                    className={`task-tag ${taskForm.taskGroup.trim() === "" ? "active" : ""}`}
+                    onClick={() => setTaskForm({ ...taskForm, taskGroup: "" })}
+                    type="button"
+                  >
+                    {tr(language, "noGroup")}
+                  </button>
+                  {knownTaskGroups.map((group) => (
+                    <button
+                      className={`task-tag ${taskForm.taskGroup.trim() === group ? "active" : ""}`}
+                      key={group}
+                      onClick={() => setTaskForm({ ...taskForm, taskGroup: group })}
+                      title={group}
+                      type="button"
+                    >
+                      {group}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="field">
+                <label htmlFor="goal">{tr(language, "goal")}</label>
                 <textarea
                   id="goal"
                   value={taskForm.goal}
@@ -507,7 +978,7 @@ export default function HomePage(): React.ReactElement {
                 />
               </div>
               <div className="field">
-                <label htmlFor="scope">Scope</label>
+                <label htmlFor="scope">{tr(language, "scope")}</label>
                 <div className="scope-reference-field">
                   <textarea
                     ref={scopeInputRef}
@@ -520,21 +991,21 @@ export default function HomePage(): React.ReactElement {
                     onClick={(event) => updateScopeMention(event.currentTarget)}
                     onKeyUp={(event) => updateScopeMention(event.currentTarget)}
                     onKeyDown={handleScopeKeyDown}
-                    placeholder={'Files, folders, and constraints. Type @ to search inside Target project path.'}
+                    placeholder={tr(language, "scopePlaceholder")}
                   />
                   {scopeMention ? (
-                    <div className="path-suggestions" role="listbox" aria-label="Scope path suggestions">
+                    <div className="path-suggestions" role="listbox" aria-label={tr(language, "scopeSuggestions")}>
                       <div className="suggestion-hint">
                         {isLoadingSuggestions
-                          ? "Searching target project..."
+                          ? tr(language, "searchingTarget")
                           : pathSuggestions.length > 0
-                            ? "Enter/Tab inserts selected path"
-                            : "No matching files or folders"}
+                            ? tr(language, "insertSelectedPath")
+                            : tr(language, "noMatchingPaths")}
                       </div>
                       {pathSuggestions.map((suggestion, index) => (
                         <Fragment key={`${suggestion.type}:${suggestion.path}`}>
                           {suggestion.match === "contains" && pathSuggestions[index - 1]?.match === "exact" ? (
-                            <div className="suggestion-divider">Contains matches</div>
+                            <div className="suggestion-divider">{language === "ko" ? "포함 일치" : "Contains matches"}</div>
                           ) : null}
                           <button
                             className={`suggestion-item ${index === selectedSuggestionIndex ? "active" : ""}`}
@@ -555,10 +1026,16 @@ export default function HomePage(): React.ReactElement {
                       ))}
                     </div>
                   ) : null}
+                  <ScopeImageAttachments
+                    images={scopeImages}
+                    language={language}
+                    addImages={addScopeImages}
+                    removeImage={removeScopeImage}
+                  />
                 </div>
               </div>
               <div className="field">
-                <label htmlFor="project">Target project path</label>
+                <label htmlFor="project">{tr(language, "targetProjectPath")}</label>
                 <div className="input-with-button">
                   <input
                     id="project"
@@ -568,13 +1045,13 @@ export default function HomePage(): React.ReactElement {
                       setNoteForm((current) => ({ ...current, projectPath: event.target.value }));
                     }}
                   />
-                  <button className="btn icon-btn" onClick={openFolderBrowser} title="Browse folders" type="button">
+                  <button className="btn icon-btn" onClick={openFolderBrowser} title={tr(language, "browseFolders")} type="button">
                     <FolderOpen size={16} aria-hidden="true" />
                   </button>
                 </div>
               </div>
               <div className="field">
-                <label htmlFor="verify">Verification command</label>
+                <label htmlFor="verify">{tr(language, "verificationCommand")}</label>
                 <input
                   id="verify"
                   value={taskForm.verificationCommand}
@@ -587,11 +1064,11 @@ export default function HomePage(): React.ReactElement {
                   checked={taskForm.approvalGrant}
                   onChange={(event) => setTaskForm({ ...taskForm, approvalGrant: event.target.checked })}
                 />
-                Grant task-level CLI permission
+                {tr(language, "grantCli")}
               </label>
               <button className="btn primary" disabled={isSubmitting} type="submit">
                 <Play size={16} aria-hidden="true" />
-                Create and Queue
+                {tr(language, "createAndQueue")}
               </button>
               {error ? <div className="error-text">{error}</div> : null}
             </form>
@@ -602,19 +1079,19 @@ export default function HomePage(): React.ReactElement {
         <section className="detail-grid">
           <div className="summary-band">
             <div className="metric">
-              <span>Active</span>
+              <span>{tr(language, "active")}</span>
               <strong>{metrics.active}</strong>
             </div>
             <div className="metric">
-              <span>Done</span>
+              <span>{tr(language, "done")}</span>
               <strong>{metrics.done}</strong>
             </div>
             <div className="metric">
-              <span>Blocked</span>
+              <span>{tr(language, "blocked")}</span>
               <strong>{metrics.blocked}</strong>
             </div>
             <div className="metric">
-              <span>Convention notes</span>
+              <span>{tr(language, "conventionNotes")}</span>
               <strong>{metrics.notes}</strong>
             </div>
           </div>
@@ -624,27 +1101,85 @@ export default function HomePage(): React.ReactElement {
               <div className="panel-header">
                 <div className="panel-title">
                   <ListChecks size={18} aria-hidden="true" />
-                  Parallel Tasks
+                  {tr(language, "parallelTasks")}
                 </div>
               </div>
               <div className="panel-body task-list">
-                {tasks.length === 0 ? (
-                  <div className="empty">No tasks yet.</div>
-                ) : (
-                  tasks.map((task) => (
+                <div className="task-group-tabs" aria-label={tr(language, "taskGroups")}>
+                  <button
+                    className={`task-group-tab ${selectedTaskGroup === "__all__" ? "active" : ""}`}
+                    onClick={() => setSelectedTaskGroup("__all__")}
+                    type="button"
+                  >
+                    <span>{tr(language, "all")}</span>
+                    <strong>{tasks.length}</strong>
+                  </button>
+                  {knownTaskGroups.map((group) => (
                     <button
+                      className={`task-group-tab ${selectedTaskGroup === group ? "active" : ""}`}
+                      key={group}
+                      onClick={() => setSelectedTaskGroup(group)}
+                      type="button"
+                    >
+                      <span>{group}</span>
+                      <strong>{taskGroupCounts.get(group) || 0}</strong>
+                    </button>
+                  ))}
+                  {hasUngroupedTasks ? (
+                    <button
+                      className={`task-group-tab ${selectedTaskGroup === "__ungrouped__" ? "active" : ""}`}
+                      onClick={() => setSelectedTaskGroup("__ungrouped__")}
+                      type="button"
+                    >
+                      <span>{tr(language, "ungrouped")}</span>
+                      <strong>{tasks.filter((task) => !task.taskGroup.trim()).length}</strong>
+                    </button>
+                  ) : null}
+                </div>
+                {tasks.length === 0 ? (
+                  <div className="empty">{tr(language, "noTasksYet")}</div>
+                ) : visibleTasks.length === 0 ? (
+                  <div className="empty">{tr(language, "noTasksInGroup")}</div>
+                ) : (
+                  visibleTasks.map((task) => (
+                    <div
                       key={task.id}
                       className={`task-item ${selectedTaskId === task.id ? "selected" : ""}`}
                       onClick={() => setSelectedTaskId(task.id)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          setSelectedTaskId(task.id);
+                        }
+                      }}
+                      role="button"
+                      tabIndex={0}
                     >
                       <div className="meta-row">
-                        <span className={`pill ${task.status}`}>{statusLabel(task.status)}</span>
-                        <span className="pill">Round {task.currentRound}</span>
+                        <span className={`pill ${task.status}`}>{statusLabel(task.status, language)}</span>
+                        {task.taskGroup ? <span className="pill group">{taskGroupLabel(task.taskGroup, language)}</span> : null}
+                        <span className="pill">
+                          {tr(language, "round")} {task.currentRound}
+                        </span>
+                        <span className="spacer" />
+                        <button
+                          aria-label={`Delete ${task.title}`}
+                          className="icon-action"
+                          disabled={!canDeleteTask(task)}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void deleteSelectedTask(task);
+                          }}
+                          type="button"
+                          title={canDeleteTask(task) ? (language === "ko" ? "Task 삭제" : "Delete task") : (language === "ko" ? "Task 실행 중" : "Task is running")}
+                        >
+                          <Trash2 size={14} aria-hidden="true" />
+                        </button>
                       </div>
                       <span className="task-title">{task.title}</span>
                       <span className="task-goal">{shortText(task.goal)}</span>
                       <span className="workspace-path">{task.worktreePath || task.targetProjectPath}</span>
-                    </button>
+                    </div>
                   ))
                 )}
               </div>
@@ -654,22 +1189,23 @@ export default function HomePage(): React.ReactElement {
               <div className="panel-header">
                 <div className="panel-title">
                   <Activity size={18} aria-hidden="true" />
-                  Task Detail
+                  {tr(language, "taskDetail")}
                 </div>
                 <button className="btn" onClick={() => void startSelectedTask()} disabled={!selectedTaskId}>
                   <Play size={16} aria-hidden="true" />
-                  Run
+                  {tr(language, "run")}
                 </button>
                 <button className="btn" onClick={() => void syncSelectedTaskToNotion()} disabled={!selectedTaskId || isSyncingNotion}>
                   <NotebookTabs size={16} aria-hidden="true" />
-                  Sync Notion
+                  {tr(language, "syncNotion")}
                 </button>
               </div>
               <div className="panel-body">
                 {!taskDetail ? (
-                  <div className="empty">Select a task to inspect agent output and verifier decisions.</div>
+                  <div className="empty">{tr(language, "selectTaskEmpty")}</div>
                 ) : (
                   <TaskDetailView
+                    language={language}
                     task={taskDetail}
                     tab={tab}
                     setTab={setTab}
@@ -679,6 +1215,13 @@ export default function HomePage(): React.ReactElement {
                     submitNote={submitNote}
                     exportConventions={exportConventions}
                     exportPreview={exportPreview}
+                    followUpMessage={followUpMessage}
+                    setFollowUpMessage={setFollowUpMessage}
+                    createFollowUp={createFollowUpForSelectedTask}
+                    isCreatingFollowUp={isCreatingFollowUp}
+                    uploadAttachments={uploadTaskImages}
+                    isUploadingAttachment={isUploadingAttachment}
+                    selectTask={setSelectedTaskId}
                   />
                 )}
               </div>
@@ -698,18 +1241,19 @@ export default function HomePage(): React.ReactElement {
             <div className="modal-header">
               <div className="panel-title">
                 <Settings size={18} aria-hidden="true" />
-                Settings
+                {tr(language, "settings")}
               </div>
               <button className="btn" onClick={() => setSettingsOpen(false)}>
-                Close
+                {tr(language, "close")}
               </button>
             </div>
             <div className="settings-section">
               <div className="section-title">
                 <SlidersHorizontal size={18} aria-hidden="true" />
-                Agent Settings
+                {tr(language, "agentSettings")}
               </div>
               <AgentSettingsForm
+                language={language}
                 agentSettings={agentSettings}
                 modelCatalog={modelCatalog}
                 isSavingSettings={isSavingSettings}
@@ -720,9 +1264,10 @@ export default function HomePage(): React.ReactElement {
             <div className="settings-section">
               <div className="section-title">
                 <NotebookTabs size={18} aria-hidden="true" />
-                Notion Sync
+                {tr(language, "notionSync")}
               </div>
               <NotionSettingsForm
+                language={language}
                 notionSettings={notionSettings}
                 isSavingNotion={isSavingNotion}
                 setNotionSettings={setNotionSettings}
@@ -743,10 +1288,10 @@ export default function HomePage(): React.ReactElement {
             <div className="modal-header">
               <div className="panel-title">
                 <FolderOpen size={18} aria-hidden="true" />
-                Select Target Folder
+                {tr(language, "selectTargetFolder")}
               </div>
               <button className="btn" onClick={() => setFolderBrowserOpen(false)}>
-                Close
+                {tr(language, "close")}
               </button>
             </div>
             <div className="settings-section">
@@ -757,7 +1302,7 @@ export default function HomePage(): React.ReactElement {
                   onClick={() => folderBrowser?.parentPath && void loadFolderBrowser(folderBrowser.parentPath)}
                   type="button"
                 >
-                  Up
+                  {language === "ko" ? "상위" : "Up"}
                 </button>
                 <button
                   className="btn primary"
@@ -765,7 +1310,7 @@ export default function HomePage(): React.ReactElement {
                   onClick={() => folderBrowser?.currentPath && selectProjectFolder(folderBrowser.currentPath)}
                   type="button"
                 >
-                  Select This Folder
+                  {tr(language, "selectThisFolder")}
                 </button>
               </div>
               <div className="folder-current-path" title={folderBrowser?.currentPath || ""}>
@@ -788,9 +1333,9 @@ export default function HomePage(): React.ReactElement {
               ) : null}
               {folderBrowserError ? <div className="error-text">{folderBrowserError}</div> : null}
               <div className="folder-list">
-                {isLoadingFolders ? <div className="empty">Loading folders...</div> : null}
+                {isLoadingFolders ? <div className="empty">{tr(language, "loadingFolders")}</div> : null}
                 {!isLoadingFolders && folderBrowser?.entries.length === 0 ? (
-                  <div className="empty">No child folders.</div>
+                  <div className="empty">{tr(language, "noChildFolders")}</div>
                 ) : null}
                 {!isLoadingFolders
                   ? folderBrowser?.entries.map((entry) => (
@@ -816,6 +1361,7 @@ export default function HomePage(): React.ReactElement {
 }
 
 function AgentSettingsForm(props: {
+  language: UiLanguage;
   agentSettings: AgentSetting[];
   modelCatalog: ModelCatalog;
   isSavingSettings: boolean;
@@ -845,6 +1391,7 @@ function AgentSettingsForm(props: {
               }
             >
               <option value="openai">openai</option>
+              <option value="codex-cli">codex-cli</option>
               <option value="mock">mock</option>
             </select>
             <select
@@ -871,13 +1418,14 @@ function AgentSettingsForm(props: {
       </div>
       <button className="btn primary" type="submit" disabled={props.isSavingSettings || props.agentSettings.length === 0}>
         <SlidersHorizontal size={16} aria-hidden="true" />
-        Save Settings
+        {tr(props.language, "saveSettings")}
       </button>
     </form>
   );
 }
 
 function NotionSettingsForm(props: {
+  language: UiLanguage;
   notionSettings: NotionSettings;
   isSavingNotion: boolean;
   setNotionSettings: React.Dispatch<React.SetStateAction<NotionSettings>>;
@@ -886,17 +1434,17 @@ function NotionSettingsForm(props: {
   return (
     <form className="form-grid" onSubmit={(event) => void props.saveNotionSettings(event)}>
       <div className="notice-line">
-        Token: {props.notionSettings.tokenConfigured ? "configured" : "missing NOTION_TOKEN in .env.local"}
+        Token: {props.notionSettings.tokenConfigured ? tr(props.language, "tokenConfigured") : tr(props.language, "tokenMissing")}
       </div>
       <div className="field">
-        <label htmlFor="notion-parent">Parent page ID</label>
+        <label htmlFor="notion-parent">{tr(props.language, "notionParentPageId")}</label>
         <input
           id="notion-parent"
           value={props.notionSettings.parentPageId}
           onChange={(event) =>
             props.setNotionSettings((current) => ({ ...current, parentPageId: event.target.value }))
           }
-          placeholder="Notion page ID to create task pages under"
+          placeholder={tr(props.language, "notionPlaceholder")}
         />
       </div>
       <button
@@ -905,13 +1453,115 @@ function NotionSettingsForm(props: {
         disabled={props.isSavingNotion || !props.notionSettings.parentPageId.trim()}
       >
         <NotebookTabs size={16} aria-hidden="true" />
-        Save Notion Settings
+        {tr(props.language, "saveNotionSettings")}
       </button>
     </form>
   );
 }
 
+function ScopeImageAttachments(props: {
+  images: File[];
+  language: UiLanguage;
+  addImages: (files: File[]) => void;
+  removeImage: (index: number) => void;
+}): React.ReactElement {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [isDragging, setDragging] = useState(false);
+  const previews = useMemo(
+    () =>
+      props.images.map((file) => ({
+        file,
+        url: URL.createObjectURL(file)
+      })),
+    [props.images]
+  );
+
+  useEffect(() => {
+    return () => {
+      for (const preview of previews) {
+        URL.revokeObjectURL(preview.url);
+      }
+    };
+  }, [previews]);
+
+  function addFiles(fileList: FileList | null): void {
+    const files = Array.from(fileList || []);
+    if (files.length > 0) {
+      props.addImages(files);
+    }
+  }
+
+  return (
+    <div className="scope-image-box">
+      <div
+        className={`scope-image-dropzone ${isDragging ? "dragging" : ""}`}
+        onClick={() => fileInputRef.current?.click()}
+        onDragEnter={(event) => {
+          event.preventDefault();
+          setDragging(true);
+        }}
+        onDragOver={(event) => {
+          event.preventDefault();
+          setDragging(true);
+        }}
+        onDragLeave={(event) => {
+          event.preventDefault();
+          setDragging(false);
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          setDragging(false);
+          addFiles(event.dataTransfer.files);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            fileInputRef.current?.click();
+          }
+        }}
+        role="button"
+        tabIndex={0}
+      >
+        <ImageIcon size={16} aria-hidden="true" />
+        <span>{tr(props.language, "scopeDropImages")}</span>
+        <small>{tr(props.language, "imageLimit")}</small>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          multiple
+          onChange={(event) => {
+            addFiles(event.target.files);
+            event.target.value = "";
+          }}
+        />
+      </div>
+      {previews.length > 0 ? (
+        <div className="scope-image-preview">
+          <div className="scope-image-heading">{tr(props.language, "pendingImages")}</div>
+          <div className="scope-image-grid">
+            {previews.map((preview, index) => (
+              <div className="scope-image-card" key={`${preview.file.name}-${preview.file.lastModified}-${index}`}>
+                <img src={preview.url} alt={preview.file.name} />
+                <span title={preview.file.name}>{preview.file.name}</span>
+                <button
+                  aria-label={`${props.language === "ko" ? "이미지 제거" : "Remove image"} ${preview.file.name}`}
+                  onClick={() => props.removeImage(index)}
+                  type="button"
+                >
+                  <Trash2 size={13} aria-hidden="true" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function TaskDetailView(props: {
+  language: UiLanguage;
   task: TaskDetail;
   tab: Tab;
   setTab: (tab: Tab) => void;
@@ -937,22 +1587,24 @@ function TaskDetailView(props: {
   submitNote: (event: FormEvent) => Promise<void>;
   exportConventions: (writeFiles: boolean) => Promise<void>;
   exportPreview: string;
+  followUpMessage: string;
+  setFollowUpMessage: React.Dispatch<React.SetStateAction<string>>;
+  createFollowUp: (event: FormEvent) => Promise<void>;
+  isCreatingFollowUp: boolean;
+  uploadAttachments: (files: File[]) => Promise<void>;
+  isUploadingAttachment: boolean;
+  selectTask: (taskId: string) => void;
 }): React.ReactElement {
-  const tabs: Array<{ id: Tab; label: string; icon: React.ReactElement }> = [
-    { id: "agents", label: "Agents", icon: <Database size={15} aria-hidden="true" /> },
-    { id: "artifacts", label: "Broker", icon: <ShieldQuestion size={15} aria-hidden="true" /> },
-    { id: "shell", label: "Shell", icon: <TerminalSquare size={15} aria-hidden="true" /> },
-    { id: "verifications", label: "Verifier", icon: <ClipboardCheck size={15} aria-hidden="true" /> },
-    { id: "conventions", label: "Unity Rules", icon: <ScrollText size={15} aria-hidden="true" /> }
-  ];
+  const tabs = tabLabels(props.language);
 
   return (
     <div className="detail-grid">
       <div className="meta-row">
-        <span className={`pill ${props.task.status}`}>{statusLabel(props.task.status)}</span>
+        <span className={`pill ${props.task.status}`}>{statusLabel(props.task.status, props.language)}</span>
+        {props.task.taskGroup ? <span className="pill group">{taskGroupLabel(props.task.taskGroup, props.language)}</span> : null}
         <span className="pill">
           <GitBranch size={13} aria-hidden="true" />
-          Round {props.task.currentRound}
+          {tr(props.language, "round")} {props.task.currentRound}
         </span>
       </div>
       <div>
@@ -961,6 +1613,45 @@ function TaskDetailView(props: {
       </div>
       {props.task.failureReason ? <div className="error-text">{props.task.failureReason}</div> : null}
       <div className="workspace-path">{props.task.worktreePath || props.task.targetProjectPath}</div>
+
+      {props.task.parentTaskId ? (
+        <div className="notice-line">
+          {tr(props.language, "followUpOfTask")} {props.task.parentTaskId}
+        </div>
+      ) : null}
+
+      <TaskAttachments
+        language={props.language}
+        attachments={props.task.attachments}
+        isUploading={props.isUploadingAttachment}
+        uploadAttachments={props.uploadAttachments}
+      />
+
+      <form className="follow-up-box" onSubmit={(event) => void props.createFollowUp(event)}>
+        <label htmlFor="follow-up-message">{tr(props.language, "followUp")}</label>
+        <textarea
+          id="follow-up-message"
+          value={props.followUpMessage}
+          onChange={(event) => props.setFollowUpMessage(event.target.value)}
+          placeholder={tr(props.language, "followUpPlaceholder")}
+        />
+        <button className="btn primary" disabled={props.isCreatingFollowUp || !props.followUpMessage.trim()} type="submit">
+          <Play size={16} aria-hidden="true" />
+          {tr(props.language, "createFollowUpTask")}
+        </button>
+      </form>
+
+      {props.task.childTasks.length > 0 ? (
+        <div className="follow-up-list">
+          <div className="section-title">{tr(props.language, "followUpTasks")}</div>
+          {props.task.childTasks.map((task) => (
+            <button className="follow-up-item" key={task.id} onClick={() => props.selectTask(task.id)} type="button">
+              <span className={`pill ${task.status}`}>{statusLabel(task.status, props.language)}</span>
+              <span>{task.title}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       <div className="tabs">
         {tabs.map((item) => (
@@ -975,12 +1666,13 @@ function TaskDetailView(props: {
         ))}
       </div>
 
-      {props.tab === "agents" ? <AgentRuns runs={props.task.agentRuns} /> : null}
-      {props.tab === "artifacts" ? <BrokerArtifacts artifacts={props.task.brokerArtifacts} /> : null}
-      {props.tab === "shell" ? <ShellLogs logs={props.task.shellLogs} /> : null}
-      {props.tab === "verifications" ? <Verifications verifications={props.task.verifications} /> : null}
+      {props.tab === "agents" ? <AgentRuns language={props.language} runs={props.task.agentRuns} /> : null}
+      {props.tab === "artifacts" ? <BrokerArtifacts language={props.language} artifacts={props.task.brokerArtifacts} /> : null}
+      {props.tab === "shell" ? <ShellLogs language={props.language} logs={props.task.shellLogs} /> : null}
+      {props.tab === "verifications" ? <Verifications language={props.language} verifications={props.task.verifications} /> : null}
       {props.tab === "conventions" ? (
         <ConventionPanel
+          language={props.language}
           notes={props.notes}
           form={props.noteForm}
           setForm={props.setNoteForm}
@@ -993,9 +1685,98 @@ function TaskDetailView(props: {
   );
 }
 
-function BrokerArtifacts({ artifacts }: { artifacts: BrokerArtifact[] }): React.ReactElement {
+function TaskAttachments(props: {
+  language: UiLanguage;
+  attachments: TaskAttachment[];
+  isUploading: boolean;
+  uploadAttachments: (files: File[]) => Promise<void>;
+}): React.ReactElement {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [isDragging, setDragging] = useState(false);
+
+  function uploadFiles(fileList: FileList | null): void {
+    const files = Array.from(fileList || []);
+    if (files.length > 0) {
+      void props.uploadAttachments(files);
+    }
+  }
+
+  return (
+    <section className="attachment-panel">
+      <div className="section-title">
+        <ImageIcon size={16} aria-hidden="true" />
+        {tr(props.language, "attachments")}
+      </div>
+      <div
+        className={`attachment-dropzone ${isDragging ? "dragging" : ""}`}
+        onDragEnter={(event) => {
+          event.preventDefault();
+          setDragging(true);
+        }}
+        onDragOver={(event) => {
+          event.preventDefault();
+          setDragging(true);
+        }}
+        onDragLeave={(event) => {
+          event.preventDefault();
+          setDragging(false);
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          setDragging(false);
+          uploadFiles(event.dataTransfer.files);
+        }}
+        role="button"
+        tabIndex={0}
+        onClick={() => fileInputRef.current?.click()}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            fileInputRef.current?.click();
+          }
+        }}
+      >
+        <Upload size={18} aria-hidden="true" />
+        <span>{props.isUploading ? tr(props.language, "uploadImages") : tr(props.language, "dropImages")}</span>
+        <small>{tr(props.language, "imageLimit")}</small>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          multiple
+          onChange={(event) => {
+            uploadFiles(event.target.files);
+            event.target.value = "";
+          }}
+        />
+      </div>
+      {props.attachments.length > 0 ? (
+        <div className="attachment-grid">
+          {props.attachments.map((attachment) => (
+            <a
+              className="attachment-card"
+              href={`/api/attachments/${attachment.id}`}
+              key={attachment.id}
+              target="_blank"
+              rel="noreferrer"
+              title={attachment.originalName}
+            >
+              <img src={`/api/attachments/${attachment.id}`} alt={attachment.originalName} />
+              <span>{attachment.originalName}</span>
+              <small>{(attachment.sizeBytes / 1024).toFixed(1)} KB</small>
+            </a>
+          ))}
+        </div>
+      ) : (
+        <div className="empty compact">{tr(props.language, "noImages")}</div>
+      )}
+    </section>
+  );
+}
+
+function BrokerArtifacts({ language, artifacts }: { language: UiLanguage; artifacts: BrokerArtifact[] }): React.ReactElement {
   if (artifacts.length === 0) {
-    return <div className="empty">No broker artifacts recorded yet.</div>;
+    return <div className="empty">{tr(language, "noBrokerArtifacts")}</div>;
   }
   return (
     <div className="log-stack">
@@ -1014,9 +1795,9 @@ function BrokerArtifacts({ artifacts }: { artifacts: BrokerArtifact[] }): React.
   );
 }
 
-function AgentRuns({ runs }: { runs: AgentRun[] }): React.ReactElement {
+function AgentRuns({ language, runs }: { language: UiLanguage; runs: AgentRun[] }): React.ReactElement {
   if (runs.length === 0) {
-    return <div className="empty">No agent runs recorded yet.</div>;
+    return <div className="empty">{tr(language, "noAgentRuns")}</div>;
   }
   return (
     <div className="log-stack">
@@ -1029,13 +1810,19 @@ function AgentRuns({ runs }: { runs: AgentRun[] }): React.ReactElement {
             <span>{run.status}</span>
           </header>
           <div className="run-budget">
-            <span>{run.inputChars.toLocaleString()} input chars</span>
-            <span>{run.outputChars.toLocaleString()} output chars</span>
-            <span>{run.contextBudgetChars.toLocaleString()} context budget</span>
-            <span>{Math.round(run.timeBudgetMs / 1000)}s time budget</span>
-            {run.wasTrimmed ? <span className="budget-warn">trimmed</span> : null}
-            {run.timedOut ? <span className="budget-danger">timed out</span> : null}
+            <span>{run.inputChars.toLocaleString()} {language === "ko" ? "입력 문자" : "input chars"}</span>
+            <span>{run.outputChars.toLocaleString()} {language === "ko" ? "출력 문자" : "output chars"}</span>
+            <span>{run.contextBudgetChars.toLocaleString()} {language === "ko" ? "컨텍스트 예산" : "context budget"}</span>
+            <span>{Math.round(run.timeBudgetMs / 1000)}s {language === "ko" ? "시간 예산" : "time budget"}</span>
+            {run.wasTrimmed ? <span className="budget-warn">{language === "ko" ? "잘림" : "trimmed"}</span> : null}
+            {run.timedOut ? <span className="budget-danger">{language === "ko" ? "시간 초과" : "timed out"}</span> : null}
           </div>
+          {run.workspacePath || run.branchName ? (
+            <div className="run-budget">
+              {run.branchName ? <span>branch: {run.branchName}</span> : null}
+              {run.workspacePath ? <span title={run.workspacePath}>worktree: {tailPath(run.workspacePath, 80)}</span> : null}
+            </div>
+          ) : null}
           <pre>{run.error || run.output || "Running..."}</pre>
         </div>
       ))}
@@ -1043,9 +1830,9 @@ function AgentRuns({ runs }: { runs: AgentRun[] }): React.ReactElement {
   );
 }
 
-function ShellLogs({ logs }: { logs: ShellLog[] }): React.ReactElement {
+function ShellLogs({ language, logs }: { language: UiLanguage; logs: ShellLog[] }): React.ReactElement {
   if (logs.length === 0) {
-    return <div className="empty">No shell commands have been run.</div>;
+    return <div className="empty">{tr(language, "noShellCommands")}</div>;
   }
   return (
     <div className="log-stack">
@@ -1064,9 +1851,9 @@ function ShellLogs({ logs }: { logs: ShellLog[] }): React.ReactElement {
   );
 }
 
-function Verifications({ verifications }: { verifications: Verification[] }): React.ReactElement {
+function Verifications({ language, verifications }: { language: UiLanguage; verifications: Verification[] }): React.ReactElement {
   if (verifications.length === 0) {
-    return <div className="empty">No verifier decisions yet.</div>;
+    return <div className="empty">{tr(language, "noVerifierDecisions")}</div>;
   }
   return (
     <div className="log-stack">
@@ -1074,9 +1861,9 @@ function Verifications({ verifications }: { verifications: Verification[] }): Re
         <div className="log-entry" key={verification.id}>
           <header>
             <span>
-              round {verification.round} / {verification.decision}
+              {tr(language, "round")} {verification.round} / {verification.decision}
             </span>
-            <span>{verification.exitCode === null ? "no command" : `exit ${verification.exitCode}`}</span>
+            <span>{verification.exitCode === null ? (language === "ko" ? "명령 없음" : "no command") : `exit ${verification.exitCode}`}</span>
           </header>
           <pre>{verification.summary}</pre>
         </div>
@@ -1086,6 +1873,7 @@ function Verifications({ verifications }: { verifications: Verification[] }): Re
 }
 
 function ConventionPanel(props: {
+  language: UiLanguage;
   notes: ConventionNote[];
   form: {
     projectPath: string;
@@ -1113,17 +1901,21 @@ function ConventionPanel(props: {
     <div className="detail-grid">
       <form className="form-grid" onSubmit={(event) => void props.submitNote(event)}>
         <div className="field">
-          <label htmlFor="note-rule">Rule</label>
+          <label htmlFor="note-rule">{tr(props.language, "rule")}</label>
           <input
             id="note-rule"
             value={props.form.rule}
             onChange={(event) => props.setForm((current) => ({ ...current, rule: event.target.value }))}
-            placeholder="Example: Keep gameplay IDs separate from localized display text."
+            placeholder={
+              props.language === "ko"
+                ? "예: gameplay ID와 현지화된 표시 텍스트는 분리한다."
+                : "Example: Keep gameplay IDs separate from localized display text."
+            }
           />
         </div>
         <div className="split">
           <div className="field">
-            <label htmlFor="note-category">Category</label>
+            <label htmlFor="note-category">{tr(props.language, "category")}</label>
             <input
               id="note-category"
               value={props.form.category}
@@ -1131,7 +1923,7 @@ function ConventionPanel(props: {
             />
           </div>
           <div className="field">
-            <label htmlFor="note-confidence">Confidence</label>
+            <label htmlFor="note-confidence">{tr(props.language, "confidence")}</label>
             <select
               id="note-confidence"
               value={props.form.confidence}
@@ -1142,14 +1934,14 @@ function ConventionPanel(props: {
                 }))
               }
             >
-              <option value="low">low</option>
-              <option value="medium">medium</option>
-              <option value="high">high</option>
+              <option value="low">{confidenceLabel("low", props.language)}</option>
+              <option value="medium">{confidenceLabel("medium", props.language)}</option>
+              <option value="high">{confidenceLabel("high", props.language)}</option>
             </select>
           </div>
         </div>
         <div className="field">
-          <label htmlFor="note-reason">Reason</label>
+          <label htmlFor="note-reason">{tr(props.language, "reason")}</label>
           <textarea
             id="note-reason"
             value={props.form.reason}
@@ -1157,7 +1949,7 @@ function ConventionPanel(props: {
           />
         </div>
         <div className="field">
-          <label htmlFor="note-examples">Examples</label>
+          <label htmlFor="note-examples">{tr(props.language, "examples")}</label>
           <textarea
             id="note-examples"
             value={props.form.examples}
@@ -1167,22 +1959,22 @@ function ConventionPanel(props: {
         <div className="button-row">
           <button className="btn primary" type="submit" disabled={!props.form.rule.trim()}>
             <Plus size={16} aria-hidden="true" />
-            Add Rule
+            {tr(props.language, "addRule")}
           </button>
           <button className="btn" type="button" onClick={() => void props.exportConventions(false)}>
             <FileDown size={16} aria-hidden="true" />
-            Preview Export
+            {tr(props.language, "previewExport")}
           </button>
           <button className="btn warn" type="button" onClick={() => void props.exportConventions(true)}>
             <FileDown size={16} aria-hidden="true" />
-            Write AGENTS.md
+            {tr(props.language, "writeAgents")}
           </button>
         </div>
       </form>
 
       <div className="log-stack">
         {props.notes.length === 0 ? (
-          <div className="empty">No Unity convention notes for this project.</div>
+          <div className="empty">{tr(props.language, "noUnityNotes")}</div>
         ) : (
           props.notes.map((note) => (
             <div className="log-entry" key={note.id}>
@@ -1201,7 +1993,7 @@ function ConventionPanel(props: {
       {props.exportPreview ? (
         <div className="log-entry">
           <header>
-            <span>Export preview</span>
+            <span>{tr(props.language, "exportPreview")}</span>
             <span>AGENTS.md + CONVENTIONS.md</span>
           </header>
           <pre>{props.exportPreview}</pre>

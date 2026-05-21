@@ -21,7 +21,7 @@ export function providerFor(role: AgentRole): AgentProvider {
   }
   const key = `${role.toUpperCase()}_PROVIDER`;
   const value = (process.env[key] || "").toLowerCase();
-  if (value === "openai" || value === "mock") {
+  if (value === "openai" || value === "codex-cli" || value === "mock") {
     return value;
   }
   return "openai";

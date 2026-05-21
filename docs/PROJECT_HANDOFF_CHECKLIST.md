@@ -8,9 +8,12 @@
   - `.env.example`을 복사해서 만든다.
   - `OPENAI_API_KEY`: OpenAI API 키.
   - `MOCK_AGENTS`: 실제 agent를 실행하려면 `0`, 더미 실행은 `1`.
-  - `RESEARCHER_PROVIDER`, `IMPLEMENTER_PROVIDER`, `TESTER_PROVIDER`, `VERIFIER_PROVIDER`: 현재는 `openai` 또는 `mock`.
+  - `RESEARCHER_PROVIDER`, `IMPLEMENTER_PROVIDER`, `TESTER_PROVIDER`, `VERIFIER_PROVIDER`: `openai`, `codex-cli`, `mock` 중 선택.
   - `RESEARCHER_MODEL`, `IMPLEMENTER_MODEL`, `TESTER_MODEL`, `VERIFIER_MODEL`: UI 설정과 함께 사용할 기본 모델.
+  - `CODEX_CLI_PATH`: `codex`가 PATH에 없을 때 `codex.exe` 전체 경로.
+  - `CODEX_CLI_SANDBOX`: Codex CLI provider의 sandbox 모드. Windows shell 실행은 `danger-full-access`가 필요할 수 있다.
   - `HARNESS_DB_PATH`: 로컬 SQLite 저장 위치. 기본값은 `.data/harness.sqlite`.
+  - `HARNESS_INTEGRATION_BRANCH`: 검증 통과 브랜치를 병합할 통합 브랜치. 기본값은 `imjae`.
   - `MAX_AGENT_ROUNDS`: 태스크당 자동 수정 반복 한도.
   - `AGENT_CONTEXT_BUDGET_CHARS`, `AGENT_OUTPUT_BUDGET_CHARS`, `AGENT_TIME_BUDGET_MS`: role별 컨텍스트, 출력, 시간 제한 기본값.
 
@@ -27,7 +30,7 @@
   - 동기화가 필요하면 Notion sync 또는 별도 Markdown export를 사용한다.
 
 - `.harness/`
-  - 태스크별 git worktree와 임시 작업공간이 저장된다.
+  - agent role/round별 git worktree와 `imjae` 통합 worktree가 저장된다.
   - 프로젝트마다 절대 경로와 로컬 상태가 달라지므로 git에 올리지 않는다.
 
 ## Project-Specific Inputs

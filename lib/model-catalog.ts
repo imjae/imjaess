@@ -39,6 +39,29 @@ const openAiModels: ModelOption[] = [
   }
 ];
 
+const codexCliModels: ModelOption[] = [
+  {
+    id: "default",
+    label: "Codex CLI default",
+    description: "Use the model configured in the local Codex CLI profile."
+  },
+  {
+    id: "gpt-5.5",
+    label: "GPT-5.5",
+    description: "Run Codex CLI with --model gpt-5.5."
+  },
+  {
+    id: "gpt-5.4",
+    label: "GPT-5.4",
+    description: "Run Codex CLI with --model gpt-5.4."
+  },
+  {
+    id: "gpt-5.4-mini",
+    label: "GPT-5.4 mini",
+    description: "Run Codex CLI with --model gpt-5.4-mini."
+  }
+];
+
 const mockModels: ModelOption[] = [
   {
     id: "mock-agent",
@@ -48,7 +71,13 @@ const mockModels: ModelOption[] = [
 ];
 
 export function modelsForProvider(provider: AgentProvider): ModelOption[] {
-  return provider === "mock" ? mockModels : openAiModels;
+  if (provider === "mock") {
+    return mockModels;
+  }
+  if (provider === "codex-cli") {
+    return codexCliModels;
+  }
+  return openAiModels;
 }
 
 export function defaultModelForProvider(provider: AgentProvider): string {
@@ -62,6 +91,7 @@ export function isValidModelForProvider(provider: AgentProvider, model: string):
 export function modelCatalog(): Record<AgentProvider, ModelOption[]> {
   return {
     openai: openAiModels,
+    "codex-cli": codexCliModels,
     mock: mockModels
   };
 }

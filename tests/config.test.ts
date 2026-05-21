@@ -14,6 +14,10 @@ describe("provider config", () => {
     delete process.env.IMPLEMENTER_PROVIDER;
     delete process.env.TESTER_PROVIDER;
     delete process.env.VERIFIER_PROVIDER;
+    delete process.env.RESEARCHER_MODEL;
+    delete process.env.IMPLEMENTER_MODEL;
+    delete process.env.TESTER_MODEL;
+    delete process.env.VERIFIER_MODEL;
   });
 
   function useTempDb(): void {
@@ -45,5 +49,12 @@ describe("provider config", () => {
     expect(shouldUseMockAgents()).toBe(true);
     process.env.MOCK_AGENTS = "0";
     expect(shouldUseMockAgents()).toBe(false);
+  });
+
+  it("accepts codex-cli as an agent provider", () => {
+    useTempDb();
+    process.env.RESEARCHER_PROVIDER = "codex-cli";
+    expect(providerFor("researcher")).toBe("codex-cli");
+    expect(modelFor("researcher")).toBe("default");
   });
 });

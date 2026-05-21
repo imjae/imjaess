@@ -1,7 +1,12 @@
+import { spawn } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import OpenAI from "openai";
 import type { AgentProvider, AgentRole } from "@/lib/types";
 import type { ShellResult } from "@/lib/shell";
 import { shouldUseMockAgents } from "@/lib/config";
+import { insertShellLog } from "@/lib/db";
 import { runShell } from "@/lib/shell";
 
 interface AgentInput {
@@ -12,6 +17,7 @@ interface AgentInput {
   taskId: string;
   workspacePath: string;
   round: number;
+  attachmentPaths?: string[];
 }
 
 interface ToolCall {
@@ -94,6 +100,29 @@ function buildInstructions(input: AgentInput): string {
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+function normalizeProviderError(error: unknown): Error {
+  const message = error instanceof Error ? error.message : String(error);
+  const status = typeof (error as { status?: unknown }).status === "number" ? (error as { status: number }).status : null;
+  const code = typeof (error as { code?: unknown }).code === "string" ? (error as { code: string }).code : "";
+  const isQuotaError =
+    status === 429 ||
+    code === "insufficient_quota" ||
+    /exceeded your current quota|billing details|insufficient_quota/i.test(message);
+
+  if (!isQuotaError) {
+    return error instanceof Error ? error : new Error(message);
+  }
+
+  return new Error(
+    [
+      "OpenAI quota exceeded for the selected agent provider/model.",
+      "The task was blocked before the current agent could finish.",
+      "Check OpenAI billing/usage limits for the API key in .env.local, or switch this role to the mock provider in Settings for local harness testing.",
+      `Original provider error: ${message}`
+    ].join("\n")
+  );
 }
 
 async function runShellTool(input: AgentInput, call: ToolCall): Promise<ShellResult | { error: string }> {
@@ -195,9 +224,210 @@ async function runOpenAiAgent(input: AgentInput): Promise<string> {
   });
 }
 
+const MAX_CODEX_OUTPUT_CHARS = 1_000_000;
+
+function appendCapped(current: string, chunk: Buffer): string {
+  const next = current + chunk.toString("utf8");
+  return next.length > MAX_CODEX_OUTPUT_CHARS ? next.slice(-MAX_CODEX_OUTPUT_CHARS) : next;
+}
+
+function displayCommand(args: string[], imageCount: number): string {
+  const renderedArgs = args
+    .map((arg) => (/\s/.test(arg) ? JSON.stringify(arg) : arg))
+    .join(" ")
+    .replace(/\s-\s*$/, " -");
+  const imageSuffix = imageCount > 0 ? `, ${imageCount} image(s)` : "";
+  return `codex ${renderedArgs} [stdin prompt omitted${imageSuffix}]`;
+}
+
+function codexCliSandboxMode(): "read-only" | "workspace-write" | "danger-full-access" {
+  const value = process.env.CODEX_CLI_SANDBOX;
+  if (value === "read-only" || value === "workspace-write" || value === "danger-full-access") {
+    return value;
+  }
+  return "danger-full-access";
+}
+
+function extractCodexCommandLogs(stdout: string): Array<{ command: string; output: string; exitCode: number | null }> {
+  const logs: Array<{ command: string; output: string; exitCode: number | null }> = [];
+  for (const line of stdout.split(/\r?\n/)) {
+    if (!line.trim().startsWith("{")) {
+      continue;
+    }
+    try {
+      const event = JSON.parse(line) as {
+        type?: string;
+        item?: {
+          type?: string;
+          command?: string;
+          aggregated_output?: string;
+          exit_code?: number | null;
+          status?: string;
+        };
+      };
+      if (event.type === "item.completed" && event.item?.type === "command_execution" && event.item.command) {
+        logs.push({
+          command: event.item.command,
+          output: event.item.aggregated_output || "",
+          exitCode: typeof event.item.exit_code === "number" ? event.item.exit_code : null
+        });
+      }
+    } catch {
+      // Codex CLI can print non-JSON warnings around JSON mode; ignore those here.
+    }
+  }
+  return logs;
+}
+
+async function runCodexCliAgent(input: AgentInput): Promise<string> {
+  const startedAt = Date.now();
+  const codexPath = process.env.CODEX_CLI_PATH || "codex";
+  const outputFile = path.join(
+    os.tmpdir(),
+    `oh-my-codex-${input.taskId}-${input.role}-${input.round}-${Date.now()}.txt`
+  );
+  const args = [
+    "--ask-for-approval",
+    "never",
+    "exec",
+    "--cd",
+    input.workspacePath,
+    "--sandbox",
+    codexCliSandboxMode(),
+    "--output-last-message",
+    outputFile,
+    "--color",
+    "never",
+    "--json",
+    "--skip-git-repo-check"
+  ];
+
+  if (input.model && input.model !== "default") {
+    args.push("--model", input.model);
+  }
+
+  for (const attachmentPath of input.attachmentPaths || []) {
+    if (fs.existsSync(attachmentPath)) {
+      args.push("--image", attachmentPath);
+    }
+  }
+
+  args.push("-");
+
+  const prompt = [
+    buildInstructions(input),
+    "You are running through Codex CLI. Treat the approved task worktree as your only writable workspace.",
+    input.role === "researcher" || input.role === "tester" || input.role === "verifier"
+      ? "Do not modify files unless the role prompt explicitly requires it."
+      : "",
+    input.attachmentPaths?.length
+      ? `The task includes ${input.attachmentPaths.length} image attachment(s). They are passed to Codex CLI as image inputs when present on disk.`
+      : "",
+    "",
+    input.prompt
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  let stdout = "";
+  let stderr = "";
+  let exitCode: number | null = null;
+
+  try {
+    const result = await new Promise<{ exitCode: number | null; stdout: string; stderr: string }>((resolve, reject) => {
+      const child = spawn(codexPath, args, {
+        cwd: input.workspacePath,
+        stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true
+      });
+
+      child.stdout.on("data", (chunk: Buffer) => {
+        stdout = appendCapped(stdout, chunk);
+      });
+      child.stderr.on("data", (chunk: Buffer) => {
+        stderr = appendCapped(stderr, chunk);
+      });
+      child.on("error", (error) => {
+        reject(error);
+      });
+      child.on("close", (code) => {
+        exitCode = code;
+        resolve({ exitCode: code, stdout, stderr });
+      });
+      child.stdin.end(prompt, "utf8");
+    });
+
+    exitCode = result.exitCode;
+    stdout = result.stdout;
+    stderr = result.stderr;
+
+    if (exitCode !== 0) {
+      throw new Error(
+        [
+          `Codex CLI exited with code ${exitCode ?? "unknown"}.`,
+          stderr ? `STDERR:\n${stderr}` : "",
+          stdout ? `STDOUT:\n${stdout}` : ""
+        ]
+          .filter(Boolean)
+          .join("\n\n")
+      );
+    }
+
+    if (fs.existsSync(outputFile)) {
+      const output = fs.readFileSync(outputFile, "utf8").trim();
+      if (output) {
+        return output;
+      }
+    }
+
+    return stdout.trim() || "Codex CLI completed without a final message.";
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new Error("Codex CLI was not found. Install Codex CLI or set CODEX_CLI_PATH in .env.local.");
+    }
+    throw error;
+  } finally {
+    const durationMs = Date.now() - startedAt;
+    for (const log of extractCodexCommandLogs(stdout)) {
+      insertShellLog({
+        taskId: input.taskId,
+        agentRole: input.role,
+        command: log.command,
+        cwd: input.workspacePath,
+        exitCode: log.exitCode,
+        stdout: log.output,
+        stderr: "",
+        durationMs
+      });
+    }
+
+    insertShellLog({
+      taskId: input.taskId,
+      agentRole: input.role,
+      command: displayCommand(args, input.attachmentPaths?.length || 0),
+      cwd: input.workspacePath,
+      exitCode,
+      stdout,
+      stderr,
+      durationMs
+    });
+
+    if (fs.existsSync(outputFile)) {
+      fs.rmSync(outputFile, { force: true });
+    }
+  }
+}
+
 export async function runAgent(input: AgentInput): Promise<string> {
   if (shouldUseMockAgents() || input.provider === "mock") {
     return mockAgent(input);
   }
-  return runOpenAiAgent(input);
+  try {
+    if (input.provider === "codex-cli") {
+      return await runCodexCliAgent(input);
+    }
+    return await runOpenAiAgent(input);
+  } catch (error) {
+    throw normalizeProviderError(error);
+  }
 }

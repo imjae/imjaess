@@ -16,7 +16,9 @@ import type {
   Project,
   ShellLog,
   Task,
+  TaskAttachment,
   TaskDetail,
+  TaskGroup,
   TaskStatus,
   Verification,
   VerificationDecision
@@ -67,6 +69,8 @@ function migrate(database: DatabaseType): void {
 
     CREATE TABLE IF NOT EXISTS tasks (
       id TEXT PRIMARY KEY,
+      parent_task_id TEXT,
+      task_group TEXT NOT NULL DEFAULT '',
       title TEXT NOT NULL,
       goal TEXT NOT NULL,
       scope TEXT NOT NULL,
@@ -78,7 +82,25 @@ function migrate(database: DatabaseType): void {
       current_round INTEGER NOT NULL DEFAULT 0,
       failure_reason TEXT,
       created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (parent_task_id) REFERENCES tasks(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS task_groups (
+      name TEXT PRIMARY KEY,
+      created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS task_attachments (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      original_name TEXT NOT NULL,
+      stored_path TEXT NOT NULL,
+      mime_type TEXT NOT NULL,
+      size_bytes INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS task_runs (
@@ -104,6 +126,8 @@ function migrate(database: DatabaseType): void {
       output_chars INTEGER NOT NULL DEFAULT 0,
       was_trimmed INTEGER NOT NULL DEFAULT 0,
       timed_out INTEGER NOT NULL DEFAULT 0,
+      workspace_path TEXT,
+      branch_name TEXT,
       input TEXT NOT NULL,
       output TEXT,
       error TEXT,
@@ -196,13 +220,30 @@ function migrate(database: DatabaseType): void {
     ["input_chars", "ALTER TABLE agent_runs ADD COLUMN input_chars INTEGER NOT NULL DEFAULT 0;"],
     ["output_chars", "ALTER TABLE agent_runs ADD COLUMN output_chars INTEGER NOT NULL DEFAULT 0;"],
     ["was_trimmed", "ALTER TABLE agent_runs ADD COLUMN was_trimmed INTEGER NOT NULL DEFAULT 0;"],
-    ["timed_out", "ALTER TABLE agent_runs ADD COLUMN timed_out INTEGER NOT NULL DEFAULT 0;"]
+    ["timed_out", "ALTER TABLE agent_runs ADD COLUMN timed_out INTEGER NOT NULL DEFAULT 0;"],
+    ["workspace_path", "ALTER TABLE agent_runs ADD COLUMN workspace_path TEXT;"],
+    ["branch_name", "ALTER TABLE agent_runs ADD COLUMN branch_name TEXT;"]
   ];
   for (const [column, sql] of agentRunMigrations) {
     if (!agentRunColumnNames.has(column)) {
       database.exec(sql);
     }
   }
+  const taskColumnNames = new Set(
+    (database.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>).map((column) => column.name)
+  );
+  if (!taskColumnNames.has("parent_task_id")) {
+    database.exec("ALTER TABLE tasks ADD COLUMN parent_task_id TEXT;");
+  }
+  if (!taskColumnNames.has("task_group")) {
+    database.exec("ALTER TABLE tasks ADD COLUMN task_group TEXT NOT NULL DEFAULT '';");
+  }
+  database.exec(`
+    INSERT OR IGNORE INTO task_groups (name, created_at, updated_at)
+    SELECT DISTINCT TRIM(task_group), created_at, updated_at
+    FROM tasks
+    WHERE TRIM(task_group) <> '';
+  `);
 }
 
 function boolFromDb(value: unknown): boolean {
@@ -212,6 +253,8 @@ function boolFromDb(value: unknown): boolean {
 function mapTask(row: Record<string, unknown>): Task {
   return {
     id: String(row.id),
+    parentTaskId: row.parent_task_id ? String(row.parent_task_id) : null,
+    taskGroup: row.task_group ? String(row.task_group) : "",
     title: String(row.title),
     goal: String(row.goal),
     scope: String(row.scope),
@@ -242,11 +285,25 @@ function mapAgentRun(row: Record<string, unknown>): AgentRun {
     outputChars: Number(row.output_chars || 0),
     wasTrimmed: boolFromDb(row.was_trimmed),
     timedOut: boolFromDb(row.timed_out),
+    workspacePath: row.workspace_path ? String(row.workspace_path) : null,
+    branchName: row.branch_name ? String(row.branch_name) : null,
     input: String(row.input),
     output: row.output ? String(row.output) : null,
     error: row.error ? String(row.error) : null,
     startedAt: String(row.started_at),
     finishedAt: row.finished_at ? String(row.finished_at) : null
+  };
+}
+
+function mapTaskAttachment(row: Record<string, unknown>): TaskAttachment {
+  return {
+    id: String(row.id),
+    taskId: String(row.task_id),
+    originalName: String(row.original_name),
+    storedPath: String(row.stored_path),
+    mimeType: String(row.mime_type),
+    sizeBytes: Number(row.size_bytes),
+    createdAt: String(row.created_at)
   };
 }
 
@@ -305,6 +362,14 @@ function mapProject(row: Record<string, unknown>): Project {
     name: String(row.name),
     path: String(row.path),
     verificationCommand: row.verification_command ? String(row.verification_command) : null,
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at)
+  };
+}
+
+function mapTaskGroup(row: Record<string, unknown>): TaskGroup {
+  return {
+    name: String(row.name),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at)
   };
@@ -384,7 +449,33 @@ export function getProjectByPath(projectPath: string): Project | null {
   return row ? mapProject(row) : null;
 }
 
+export function upsertTaskGroup(name: string): TaskGroup | null {
+  const trimmedName = name.trim();
+  if (!trimmedName) {
+    return null;
+  }
+  const timestamp = nowIso();
+  const database = getDb();
+  database
+    .prepare(
+      `INSERT INTO task_groups (name, created_at, updated_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT(name) DO UPDATE SET updated_at = excluded.updated_at`
+    )
+    .run(trimmedName, timestamp, timestamp);
+  return mapTaskGroup(database.prepare("SELECT * FROM task_groups WHERE name = ?").get(trimmedName) as Record<string, unknown>);
+}
+
+export function listTaskGroups(): TaskGroup[] {
+  return (getDb().prepare("SELECT * FROM task_groups ORDER BY name COLLATE NOCASE ASC").all() as Record<
+    string,
+    unknown
+  >[]).map(mapTaskGroup);
+}
+
 export function createTask(input: {
+  parentTaskId?: string | null;
+  taskGroup?: string;
   title: string;
   goal: string;
   scope: string;
@@ -395,6 +486,8 @@ export function createTask(input: {
   const timestamp = nowIso();
   const task: Task = {
     id: randomUUID(),
+    parentTaskId: input.parentTaskId || null,
+    taskGroup: input.taskGroup?.trim() || "",
     title: input.title,
     goal: input.goal,
     scope: input.scope,
@@ -408,14 +501,19 @@ export function createTask(input: {
     createdAt: timestamp,
     updatedAt: timestamp
   };
+  if (task.taskGroup) {
+    upsertTaskGroup(task.taskGroup);
+  }
   getDb()
     .prepare(
       `INSERT INTO tasks
-      (id, title, goal, scope, target_project_path, worktree_path, agent_plan, approval_grant, status, current_round, failure_reason, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      (id, parent_task_id, task_group, title, goal, scope, target_project_path, worktree_path, agent_plan, approval_grant, status, current_round, failure_reason, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       task.id,
+      task.parentTaskId,
+      task.taskGroup,
       task.title,
       task.goal,
       task.scope,
@@ -443,6 +541,20 @@ export function getTask(id: string): Task | null {
   return row ? mapTask(row) : null;
 }
 
+export function listChildTasks(parentTaskId: string): Task[] {
+  return (
+    getDb().prepare("SELECT * FROM tasks WHERE parent_task_id = ? ORDER BY created_at DESC").all(parentTaskId) as Record<
+      string,
+      unknown
+    >[]
+  ).map(mapTask);
+}
+
+export function deleteTask(id: string): boolean {
+  const result = getDb().prepare("DELETE FROM tasks WHERE id = ?").run(id);
+  return result.changes > 0;
+}
+
 export function getTaskDetail(id: string): TaskDetail | null {
   const task = getTask(id);
   if (!task) {
@@ -451,6 +563,8 @@ export function getTaskDetail(id: string): TaskDetail | null {
   const database = getDb();
   return {
     ...task,
+    childTasks: listChildTasks(id),
+    attachments: listTaskAttachments(id),
     agentRuns: (
       database.prepare("SELECT * FROM agent_runs WHERE task_id = ? ORDER BY started_at ASC").all(id) as Record<
         string,
@@ -477,6 +591,46 @@ export function getTaskDetail(id: string): TaskDetail | null {
     ).map(mapBrokerArtifact),
     notionSync: getNotionSync(id)
   };
+}
+
+export function insertTaskAttachment(input: Omit<TaskAttachment, "id" | "createdAt">): TaskAttachment {
+  const attachment: TaskAttachment = {
+    ...input,
+    id: randomUUID(),
+    createdAt: nowIso()
+  };
+  getDb()
+    .prepare(
+      `INSERT INTO task_attachments
+      (id, task_id, original_name, stored_path, mime_type, size_bytes, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      attachment.id,
+      attachment.taskId,
+      attachment.originalName,
+      attachment.storedPath,
+      attachment.mimeType,
+      attachment.sizeBytes,
+      attachment.createdAt
+    );
+  return attachment;
+}
+
+export function listTaskAttachments(taskId: string): TaskAttachment[] {
+  return (
+    getDb().prepare("SELECT * FROM task_attachments WHERE task_id = ? ORDER BY created_at DESC").all(taskId) as Record<
+      string,
+      unknown
+    >[]
+  ).map(mapTaskAttachment);
+}
+
+export function getTaskAttachment(id: string): TaskAttachment | null {
+  const row = getDb().prepare("SELECT * FROM task_attachments WHERE id = ?").get(id) as
+    | Record<string, unknown>
+    | undefined;
+  return row ? mapTaskAttachment(row) : null;
 }
 
 export function updateTask(id: string, patch: Partial<Pick<Task, "status" | "worktreePath" | "currentRound" | "failureReason">>): void {
@@ -524,13 +678,15 @@ export function createAgentRun(input: {
   timeBudgetMs: number;
   inputChars: number;
   wasTrimmed: boolean;
+  workspacePath?: string | null;
+  branchName?: string | null;
 }): string {
   const id = randomUUID();
   getDb()
     .prepare(
       `INSERT INTO agent_runs
-      (id, task_id, role, provider, model, round, status, context_budget_chars, time_budget_ms, input_chars, was_trimmed, input, started_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      (id, task_id, role, provider, model, round, status, context_budget_chars, time_budget_ms, input_chars, was_trimmed, workspace_path, branch_name, input, started_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       id,
@@ -544,6 +700,8 @@ export function createAgentRun(input: {
       input.timeBudgetMs,
       input.inputChars,
       input.wasTrimmed ? 1 : 0,
+      input.workspacePath || null,
+      input.branchName || null,
       input.prompt,
       nowIso()
     );

@@ -1,7 +1,7 @@
 import { Client } from "@notionhq/client";
 import type { BlockObjectRequest } from "@notionhq/client/build/src/api-endpoints";
 import { getNotionSettings, getNotionSync, getTaskDetail, upsertNotionSync } from "@/lib/db";
-import { taskReportMarkdown } from "@/lib/task-report";
+import { taskReportMarkdown, type TaskReportLanguage } from "@/lib/task-report";
 
 function notionClient(): Client {
   if (!process.env.NOTION_TOKEN) {
@@ -125,7 +125,10 @@ async function replaceChildren(client: Client, pageId: string, blocks: BlockObje
   }
 }
 
-export async function syncTaskToNotion(taskId: string): Promise<{ pageId: string; url: string | null; markdown: string }> {
+export async function syncTaskToNotion(
+  taskId: string,
+  options: { language?: TaskReportLanguage } = {}
+): Promise<{ pageId: string; url: string | null; markdown: string }> {
   const task = getTaskDetail(taskId);
   if (!task) {
     throw new Error(`Task not found: ${taskId}`);
@@ -136,7 +139,7 @@ export async function syncTaskToNotion(taskId: string): Promise<{ pageId: string
   }
 
   const client = notionClient();
-  const markdown = taskReportMarkdown(task);
+  const markdown = taskReportMarkdown(task, { language: options.language || "en" });
   const blocks = markdownToBlocks(markdown);
   const existing = getNotionSync(taskId);
 

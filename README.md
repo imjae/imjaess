@@ -6,7 +6,7 @@ Localhost-only MVP for running context-isolated Codex agents through a `Research
 
 - Creates local tasks from a web dashboard.
 - Runs multiple tasks in parallel through an in-process Node worker queue.
-- Creates one git worktree per task when the target project is a git repository.
+- Creates isolated git worktrees per agent role and round when the target project is a git repository.
 - Gives CLI access only to the server-side worker, never to the browser.
 - Logs every shell command with cwd, stdout, stderr, exit code, duration, task, and agent role.
 - Stores tasks, agent runs, verifier decisions, shell logs, projects, and Unity convention notes in SQLite.
@@ -42,8 +42,23 @@ VERIFIER_PROVIDER=openai
 VERIFIER_MODEL=gpt-5.4
 ```
 
+For ChatGPT-login Codex CLI calls, log in once with `codex login`, then select `codex-cli` in the web settings or use:
+
+```env
+MOCK_AGENTS=0
+
+RESEARCHER_PROVIDER=codex-cli
+RESEARCHER_MODEL=default
+IMPLEMENTER_PROVIDER=codex-cli
+IMPLEMENTER_MODEL=default
+TESTER_PROVIDER=codex-cli
+TESTER_MODEL=default
+VERIFIER_PROVIDER=codex-cli
+VERIFIER_MODEL=default
+```
+
 Providers and model names are environment-driven so you can swap researcher, implementer, tester, and verifier independently.
-Use `openai` or `mock` as provider values.
+Use `openai`, `codex-cli`, or `mock` as provider values. `codex-cli` runs `codex exec` inside the task worktree and can receive task images through Codex CLI image inputs. On Windows, shell execution may require `CODEX_CLI_SANDBOX=danger-full-access`; the harness still logs the outer Codex run and command execution events reported by Codex CLI JSON output.
 
 The web UI has an **Agent Settings** panel. Values saved there are stored in SQLite and take precedence over `.env.local` for future task runs. Models are selected from a provider-specific list rather than typed as free-form strings. Set all role models to `GPT-5.5` there if you want the full pipeline to use GPT-5.5.
 
@@ -57,6 +72,16 @@ The default Codex-only flow intentionally prevents agents from seeing each other
 - The broker stores a diff-based `implementation_brief`; `tester` does not see implementer output or intent.
 - `tester` sees task brief plus broker implementation brief and validates independently.
 - `verifier` sees broker artifacts and command evidence, not private raw agent logs.
+
+## Unity Worktree Flow
+
+For Unity projects, the harness avoids opening or mutating every candidate branch in the same editor checkout:
+
+- Each role gets its own worktree under `.harness/worktrees/<task>/<round-role>`.
+- `implementer` changes are committed to `harness/<task>/implementer/rN`.
+- `tester` and `verifier` get separate worktrees based on that implementation commit, so they can inspect and run Unity/batchmode validation without sharing private agent context.
+- Only a `pass` verifier decision merges the implementation branch into `HARNESS_INTEGRATION_BRANCH`, which defaults to `imjae`.
+- Open Unity against the `imjae` integration branch/worktree for manual visual confirmation, then merge to `main` outside the harness when satisfied.
 
 ## Scope References
 

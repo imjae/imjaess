@@ -29,6 +29,11 @@ export function enqueueTask(taskId: string): void {
   startWorker();
 }
 
+export function removeQueuedTask(taskId: string): void {
+  const queueState = state();
+  queueState.queue = queueState.queue.filter((queuedTaskId) => queuedTaskId !== taskId);
+}
+
 export function startWorker(): void {
   const queueState = state();
   if (queueState.started) {

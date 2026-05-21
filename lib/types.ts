@@ -9,7 +9,7 @@ export type TaskStatus =
 
 export type AgentRole = "researcher" | "implementer" | "tester" | "verifier";
 
-export type AgentProvider = "openai" | "mock";
+export type AgentProvider = "openai" | "codex-cli" | "mock";
 
 export type VerificationDecision = "pass" | "needs_fix" | "blocked";
 
@@ -42,8 +42,16 @@ export interface Project {
   updatedAt: string;
 }
 
+export interface TaskGroup {
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Task {
   id: string;
+  parentTaskId: string | null;
+  taskGroup: string;
   title: string;
   goal: string;
   scope: string;
@@ -56,6 +64,16 @@ export interface Task {
   failureReason: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface TaskAttachment {
+  id: string;
+  taskId: string;
+  originalName: string;
+  storedPath: string;
+  mimeType: string;
+  sizeBytes: number;
+  createdAt: string;
 }
 
 export interface AgentRun {
@@ -72,6 +90,8 @@ export interface AgentRun {
   outputChars: number;
   wasTrimmed: boolean;
   timedOut: boolean;
+  workspacePath: string | null;
+  branchName: string | null;
   input: string;
   output: string | null;
   error: string | null;
@@ -127,6 +147,8 @@ export interface ConventionNote {
 }
 
 export interface TaskDetail extends Task {
+  childTasks: Task[];
+  attachments: TaskAttachment[];
   agentRuns: AgentRun[];
   shellLogs: ShellLog[];
   verifications: Verification[];
@@ -136,6 +158,7 @@ export interface TaskDetail extends Task {
 
 export interface CreateTaskInput {
   title: string;
+  taskGroup?: string;
   goal: string;
   scope?: string;
   targetProjectPath: string;

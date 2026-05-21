@@ -101,6 +101,32 @@ button {
   font-size: 13px;
 }
 
+.language-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #f4f6f2;
+  padding: 3px;
+}
+
+.language-toggle button {
+  min-height: 28px;
+  border-radius: 999px;
+  background: transparent;
+  color: #3f4751;
+  cursor: pointer;
+  padding: 0 9px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.language-toggle button.active {
+  background: var(--accent);
+  color: #fff;
+}
+
 .main-grid {
   display: grid;
   grid-template-columns: minmax(320px, 410px) minmax(0, 1fr);
@@ -259,6 +285,107 @@ button {
   position: relative;
   display: grid;
   gap: 6px;
+}
+
+.scope-image-box {
+  display: grid;
+  gap: 8px;
+}
+
+.scope-image-dropzone {
+  display: grid;
+  place-items: center;
+  gap: 4px;
+  min-height: 86px;
+  border: 1px dashed #a8b4ad;
+  border-radius: 8px;
+  background: #fbfbf8;
+  color: #3f4751;
+  cursor: pointer;
+  padding: 12px;
+  text-align: center;
+}
+
+.scope-image-dropzone.dragging,
+.scope-image-dropzone:hover,
+.scope-image-dropzone:focus-visible {
+  border-color: var(--accent);
+  background: #e8f2ef;
+  outline: none;
+}
+
+.scope-image-dropzone span {
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.scope-image-dropzone small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.scope-image-dropzone input {
+  display: none;
+}
+
+.scope-image-preview {
+  display: grid;
+  gap: 7px;
+}
+
+.scope-image-heading {
+  color: #3d444d;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.scope-image-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  gap: 8px;
+}
+
+.scope-image-card {
+  position: relative;
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fcfcfb;
+  padding: 6px;
+}
+
+.scope-image-card img {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: 6px;
+  background: #e9eeea;
+}
+
+.scope-image-card span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #3f4751;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.scope-image-card button {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--danger);
+  cursor: pointer;
 }
 
 .path-suggestions {
@@ -423,6 +550,140 @@ button {
   white-space: nowrap;
 }
 
+.follow-up-box {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfbf8;
+  padding: 12px;
+}
+
+.follow-up-box label {
+  color: #3d444d;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.follow-up-box textarea {
+  width: 100%;
+  min-height: 74px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ink);
+  padding: 10px 11px;
+  resize: vertical;
+  outline: none;
+}
+
+.attachment-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.attachment-dropzone {
+  display: grid;
+  place-items: center;
+  gap: 6px;
+  min-height: 118px;
+  border: 1px dashed #a8b4ad;
+  border-radius: 8px;
+  background: #fbfbf8;
+  color: #3f4751;
+  cursor: pointer;
+  padding: 16px;
+  text-align: center;
+}
+
+.attachment-dropzone.dragging,
+.attachment-dropzone:hover,
+.attachment-dropzone:focus-visible {
+  border-color: var(--accent);
+  background: #e8f2ef;
+  outline: none;
+}
+
+.attachment-dropzone span {
+  font-weight: 800;
+}
+
+.attachment-dropzone small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.attachment-dropzone input {
+  display: none;
+}
+
+.attachment-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  gap: 10px;
+}
+
+.attachment-card {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fcfcfb;
+  color: inherit;
+  padding: 8px;
+  text-decoration: none;
+}
+
+.attachment-card img {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: 6px;
+  background: #e9eeea;
+}
+
+.attachment-card span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.attachment-card small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.follow-up-list {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fcfcfb;
+  padding: 12px;
+}
+
+.follow-up-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.follow-up-item:hover {
+  background: #e8f2ef;
+}
+
 .checkbox-row {
   display: flex;
   gap: 9px;
@@ -472,9 +733,83 @@ button {
   opacity: 0.55;
 }
 
+.task-tag-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.task-tag {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #f4f6f2;
+  color: #3f4751;
+  padding: 0 9px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-tag:hover,
+.task-tag.active {
+  border-color: var(--accent);
+  background: #dff2ee;
+  color: #064b4b;
+}
+
 .task-list {
   display: grid;
   gap: 10px;
+}
+
+.task-group-tabs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.task-group-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  max-width: 180px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #f4f6f2;
+  color: #3f4751;
+  padding: 0 10px;
+  cursor: pointer;
+}
+
+.task-group-tab span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-group-tab strong {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.task-group-tab.active {
+  border-color: var(--accent);
+  background: #dff2ee;
+  color: #064b4b;
+}
+
+.task-group-tab.active strong {
+  color: #064b4b;
 }
 
 .task-item {
@@ -515,6 +850,37 @@ button {
   gap: 7px;
 }
 
+.spacer {
+  flex: 1;
+}
+
+.icon-action {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.icon-action:hover,
+.icon-action:focus-visible {
+  background: #f9dddd;
+  color: var(--danger);
+}
+
+.icon-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.38;
+}
+
+.icon-action:disabled:hover {
+  background: transparent;
+  color: var(--muted);
+}
+
 .pill {
   display: inline-flex;
   align-items: center;
@@ -530,6 +896,11 @@ button {
 
 .pill.queued {
   background: #e8edf5;
+}
+
+.pill.group {
+  background: #f2eadc;
+  color: #633c0d;
 }
 
 .pill.running,
@@ -691,6 +1062,11 @@ button {
   border: 1px dashed var(--line);
   border-radius: 8px;
   background: #fcfcfb;
+}
+
+.empty.compact {
+  padding: 14px;
+  font-size: 13px;
 }
 
 .error-text {
