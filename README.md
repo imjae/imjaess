@@ -58,6 +58,24 @@ The default Codex-only flow intentionally prevents agents from seeing each other
 - `tester` sees task brief plus broker implementation brief and validates independently.
 - `verifier` sees broker artifacts and command evidence, not private raw agent logs.
 
+## Scope References
+
+The task `Scope` field supports lightweight `@` references. Type `@` in the Scope box to search files and folders under `Target project path`, then press Enter/Tab or click a suggestion.
+
+```text
+@Assets/Scripts/UI/Trade/TradeInventoryPopup.cs
+@Assets/Scripts/UI/Trade
+@"Assets/Folder With Spaces"
+```
+
+References are resolved inside the task worktree during execution, so they cannot read files outside the task workspace.
+File references attach clipped text content to the agent prompt. Folder references attach a shallow directory listing only. Use `Scope` for file/folder hints and hard constraints; use `Goal` for the actual request.
+
+Suggestion priority:
+
+- If the query includes an extension, exact file-name matches appear first. Contains matches appear below a divider.
+- If the query has no extension, exact folder names and exact file stems appear first. Contains matches for files and folders appear below a divider.
+
 ## Execution Management
 
 Each agent run is managed as a short sub-agent slice:

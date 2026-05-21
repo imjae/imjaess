@@ -255,11 +255,172 @@ button {
   min-height: 76px;
 }
 
+.scope-reference-field {
+  position: relative;
+  display: grid;
+  gap: 6px;
+}
+
+.path-suggestions {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 20;
+  display: grid;
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 18px 44px rgba(32, 33, 36, 0.16);
+}
+
+.suggestion-hint {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.suggestion-item {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 10px;
+  background: #fcfcfb;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.suggestion-item + .suggestion-item {
+  border-top: 1px solid #ecefea;
+}
+
+.suggestion-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.suggestion-divider::before,
+.suggestion-divider::after {
+  content: "";
+  height: 1px;
+  flex: 1;
+  background: var(--line);
+}
+
+.suggestion-item.active,
+.suggestion-item:hover {
+  background: #e8f2ef;
+}
+
+.suggestion-type {
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.suggestion-path {
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
 .field input:focus,
 .field textarea:focus,
 .field select:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(13, 110, 110, 0.14);
+}
+
+.input-with-button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 40px;
+  gap: 8px;
+  align-items: center;
+}
+
+.icon-btn {
+  width: 40px;
+  padding: 0;
+}
+
+.folder-browser-modal {
+  width: min(680px, 100%);
+}
+
+.folder-browser-toolbar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.folder-current-path {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fbfbf8;
+  color: #3f4751;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  padding: 9px 11px;
+}
+
+.folder-roots {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.folder-list {
+  display: grid;
+  max-height: min(420px, 52vh);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fcfcfb;
+}
+
+.folder-row {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-height: 36px;
+  padding: 8px 10px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.folder-row + .folder-row {
+  border-top: 1px solid #ecefea;
+}
+
+.folder-row:hover {
+  background: #e8f2ef;
+}
+
+.folder-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .checkbox-row {

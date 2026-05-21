@@ -1,12 +1,13 @@
 "use client";
 
 import type React from "react";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, Fragment, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   ClipboardCheck,
   Database,
   FileDown,
+  FolderOpen,
   Gauge,
   GitBranch,
   NotebookTabs,
@@ -42,6 +43,26 @@ type NotionSettings = {
   updatedAt: string | null;
   tokenConfigured: boolean;
 };
+type PathSuggestion = {
+  path: string;
+  type: "file" | "directory";
+  match: "exact" | "contains";
+};
+type ScopeMention = {
+  start: number;
+  end: number;
+  query: string;
+};
+type FolderBrowserEntry = {
+  name: string;
+  path: string;
+};
+type FolderBrowserResult = {
+  currentPath: string;
+  parentPath: string | null;
+  roots: string[];
+  entries: FolderBrowserEntry[];
+};
 
 function statusLabel(status: Task["status"]): string {
   const labels: Record<Task["status"], string> = {
@@ -60,6 +81,27 @@ function shortText(text: string, max = 120): string {
   return text.length > max ? `${text.slice(0, max)}...` : text;
 }
 
+function tailPath(text: string, max = 54): string {
+  if (text.length <= max) {
+    return text;
+  }
+  return `...${text.slice(-(max - 3))}`;
+}
+
+function activeScopeMention(value: string, cursor: number): ScopeMention | null {
+  const beforeCursor = value.slice(0, cursor);
+  const match = beforeCursor.match(/@(?:"([^"]*)$|'([^']*)$|`([^`]*)$|([^\s,;]*)$)/);
+  if (!match || match.index === undefined) {
+    return null;
+  }
+  const query = match[1] ?? match[2] ?? match[3] ?? match[4] ?? "";
+  return {
+    start: match.index,
+    end: cursor,
+    query: query.trim()
+  };
+}
+
 async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     ...init,
@@ -76,6 +118,7 @@ async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export default function HomePage(): React.ReactElement {
+  const scopeInputRef = useRef<HTMLTextAreaElement | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [taskDetail, setTaskDetail] = useState<TaskDetail | null>(null);
@@ -95,6 +138,14 @@ export default function HomePage(): React.ReactElement {
   const [isSettingsOpen, setSettingsOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [exportPreview, setExportPreview] = useState<string>("");
+  const [scopeMention, setScopeMention] = useState<ScopeMention | null>(null);
+  const [pathSuggestions, setPathSuggestions] = useState<PathSuggestion[]>([]);
+  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
+  const [isLoadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [isFolderBrowserOpen, setFolderBrowserOpen] = useState(false);
+  const [isLoadingFolders, setLoadingFolders] = useState(false);
+  const [folderBrowser, setFolderBrowser] = useState<FolderBrowserResult | null>(null);
+  const [folderBrowserError, setFolderBrowserError] = useState<string | null>(null);
 
   const [taskForm, setTaskForm] = useState({
     title: "Unity convention-safe task",
@@ -169,6 +220,46 @@ export default function HomePage(): React.ReactElement {
     void refreshNotes().catch(() => undefined);
   }, [noteForm.projectPath]);
 
+  useEffect(() => {
+    if (!scopeMention) {
+      setPathSuggestions([]);
+      setSelectedSuggestionIndex(0);
+      setLoadingSuggestions(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      setLoadingSuggestions(true);
+      void jsonFetch<{ suggestions: PathSuggestion[] }>("/api/path-suggestions", {
+        method: "POST",
+        signal: controller.signal,
+        body: JSON.stringify({
+          targetProjectPath: taskForm.targetProjectPath,
+          query: scopeMention.query
+        })
+      })
+        .then((data) => {
+          setPathSuggestions(data.suggestions);
+          setSelectedSuggestionIndex(0);
+        })
+        .catch((err: unknown) => {
+          if (err instanceof DOMException && err.name === "AbortError") {
+            return;
+          }
+          setPathSuggestions([]);
+        })
+        .finally(() => {
+          setLoadingSuggestions(false);
+        });
+    }, 150);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [scopeMention, taskForm.targetProjectPath]);
+
   const metrics = useMemo(() => {
     return {
       active: tasks.filter((task) => ["queued", "running", "reviewing", "verifying", "needs_fix"].includes(task.status))
@@ -195,6 +286,84 @@ export default function HomePage(): React.ReactElement {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function updateScopeMention(textArea: HTMLTextAreaElement): void {
+    setScopeMention(activeScopeMention(textArea.value, textArea.selectionStart));
+  }
+
+  function insertScopeSuggestion(suggestion: PathSuggestion): void {
+    if (!scopeMention) {
+      return;
+    }
+    const textArea = scopeInputRef.current;
+    const currentScope = taskForm.scope;
+    const needsQuotes = /\s/.test(suggestion.path);
+    const replacement = needsQuotes ? `@"${suggestion.path}"` : `@${suggestion.path}`;
+    const nextScope = `${currentScope.slice(0, scopeMention.start)}${replacement}${currentScope.slice(scopeMention.end)}`;
+    const nextCursor = scopeMention.start + replacement.length;
+
+    setTaskForm((current) => ({ ...current, scope: nextScope }));
+    setScopeMention(null);
+    setPathSuggestions([]);
+
+    window.setTimeout(() => {
+      textArea?.focus();
+      textArea?.setSelectionRange(nextCursor, nextCursor);
+    }, 0);
+  }
+
+  function handleScopeKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
+    if (!scopeMention || pathSuggestions.length === 0) {
+      return;
+    }
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setSelectedSuggestionIndex((current) => (current + 1) % pathSuggestions.length);
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setSelectedSuggestionIndex((current) => (current - 1 + pathSuggestions.length) % pathSuggestions.length);
+      return;
+    }
+    if (event.key === "Enter" || event.key === "Tab") {
+      event.preventDefault();
+      insertScopeSuggestion(pathSuggestions[selectedSuggestionIndex]);
+      return;
+    }
+    if (event.key === "Escape") {
+      setScopeMention(null);
+      setPathSuggestions([]);
+    }
+  }
+
+  async function loadFolderBrowser(pathValue: string): Promise<void> {
+    setLoadingFolders(true);
+    setFolderBrowserError(null);
+    try {
+      const data = await jsonFetch<{ result: FolderBrowserResult }>("/api/folder-browser", {
+        method: "POST",
+        body: JSON.stringify({ path: pathValue })
+      });
+      setFolderBrowser(data.result);
+    } catch (err) {
+      setFolderBrowserError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoadingFolders(false);
+    }
+  }
+
+  function openFolderBrowser(): void {
+    setFolderBrowserOpen(true);
+    void loadFolderBrowser(taskForm.targetProjectPath);
+  }
+
+  function selectProjectFolder(pathValue: string): void {
+    setTaskForm((current) => ({ ...current, targetProjectPath: pathValue }));
+    setNoteForm((current) => ({ ...current, projectPath: pathValue }));
+    setFolderBrowserOpen(false);
   }
 
   async function saveAgentSettings(event: FormEvent): Promise<void> {
@@ -339,22 +508,70 @@ export default function HomePage(): React.ReactElement {
               </div>
               <div className="field">
                 <label htmlFor="scope">Scope</label>
-                <textarea
-                  id="scope"
-                  value={taskForm.scope}
-                  onChange={(event) => setTaskForm({ ...taskForm, scope: event.target.value })}
-                />
+                <div className="scope-reference-field">
+                  <textarea
+                    ref={scopeInputRef}
+                    id="scope"
+                    value={taskForm.scope}
+                    onChange={(event) => {
+                      setTaskForm({ ...taskForm, scope: event.target.value });
+                      updateScopeMention(event.target);
+                    }}
+                    onClick={(event) => updateScopeMention(event.currentTarget)}
+                    onKeyUp={(event) => updateScopeMention(event.currentTarget)}
+                    onKeyDown={handleScopeKeyDown}
+                    placeholder={'Files, folders, and constraints. Type @ to search inside Target project path.'}
+                  />
+                  {scopeMention ? (
+                    <div className="path-suggestions" role="listbox" aria-label="Scope path suggestions">
+                      <div className="suggestion-hint">
+                        {isLoadingSuggestions
+                          ? "Searching target project..."
+                          : pathSuggestions.length > 0
+                            ? "Enter/Tab inserts selected path"
+                            : "No matching files or folders"}
+                      </div>
+                      {pathSuggestions.map((suggestion, index) => (
+                        <Fragment key={`${suggestion.type}:${suggestion.path}`}>
+                          {suggestion.match === "contains" && pathSuggestions[index - 1]?.match === "exact" ? (
+                            <div className="suggestion-divider">Contains matches</div>
+                          ) : null}
+                          <button
+                            className={`suggestion-item ${index === selectedSuggestionIndex ? "active" : ""}`}
+                            onMouseDown={(event) => {
+                              event.preventDefault();
+                              insertScopeSuggestion(suggestion);
+                            }}
+                            role="option"
+                            aria-selected={index === selectedSuggestionIndex}
+                            type="button"
+                          >
+                            <span className="suggestion-type">{suggestion.type === "directory" ? "DIR" : "FILE"}</span>
+                            <span className="suggestion-path" title={suggestion.path}>
+                              {tailPath(suggestion.path)}
+                            </span>
+                          </button>
+                        </Fragment>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
               </div>
               <div className="field">
                 <label htmlFor="project">Target project path</label>
-                <input
-                  id="project"
-                  value={taskForm.targetProjectPath}
-                  onChange={(event) => {
-                    setTaskForm({ ...taskForm, targetProjectPath: event.target.value });
-                    setNoteForm((current) => ({ ...current, projectPath: event.target.value }));
-                  }}
-                />
+                <div className="input-with-button">
+                  <input
+                    id="project"
+                    value={taskForm.targetProjectPath}
+                    onChange={(event) => {
+                      setTaskForm({ ...taskForm, targetProjectPath: event.target.value });
+                      setNoteForm((current) => ({ ...current, projectPath: event.target.value }));
+                    }}
+                  />
+                  <button className="btn icon-btn" onClick={openFolderBrowser} title="Browse folders" type="button">
+                    <FolderOpen size={16} aria-hidden="true" />
+                  </button>
+                </div>
               </div>
               <div className="field">
                 <label htmlFor="verify">Verification command</label>
@@ -511,6 +728,85 @@ export default function HomePage(): React.ReactElement {
                 setNotionSettings={setNotionSettings}
                 saveNotionSettings={saveNotionSettings}
               />
+            </div>
+          </section>
+        </div>
+      ) : null}
+      {isFolderBrowserOpen ? (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setFolderBrowserOpen(false)}>
+          <section
+            aria-modal="true"
+            className="settings-modal folder-browser-modal"
+            role="dialog"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="modal-header">
+              <div className="panel-title">
+                <FolderOpen size={18} aria-hidden="true" />
+                Select Target Folder
+              </div>
+              <button className="btn" onClick={() => setFolderBrowserOpen(false)}>
+                Close
+              </button>
+            </div>
+            <div className="settings-section">
+              <div className="folder-browser-toolbar">
+                <button
+                  className="btn"
+                  disabled={!folderBrowser?.parentPath || isLoadingFolders}
+                  onClick={() => folderBrowser?.parentPath && void loadFolderBrowser(folderBrowser.parentPath)}
+                  type="button"
+                >
+                  Up
+                </button>
+                <button
+                  className="btn primary"
+                  disabled={!folderBrowser?.currentPath}
+                  onClick={() => folderBrowser?.currentPath && selectProjectFolder(folderBrowser.currentPath)}
+                  type="button"
+                >
+                  Select This Folder
+                </button>
+              </div>
+              <div className="folder-current-path" title={folderBrowser?.currentPath || ""}>
+                {folderBrowser?.currentPath || "Loading..."}
+              </div>
+              {folderBrowser?.roots.length ? (
+                <div className="folder-roots">
+                  {folderBrowser.roots.map((root) => (
+                    <button
+                      className="btn"
+                      key={root}
+                      onClick={() => void loadFolderBrowser(root)}
+                      title={root}
+                      type="button"
+                    >
+                      {root}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              {folderBrowserError ? <div className="error-text">{folderBrowserError}</div> : null}
+              <div className="folder-list">
+                {isLoadingFolders ? <div className="empty">Loading folders...</div> : null}
+                {!isLoadingFolders && folderBrowser?.entries.length === 0 ? (
+                  <div className="empty">No child folders.</div>
+                ) : null}
+                {!isLoadingFolders
+                  ? folderBrowser?.entries.map((entry) => (
+                      <button
+                        className="folder-row"
+                        key={entry.path}
+                        onClick={() => void loadFolderBrowser(entry.path)}
+                        title={entry.path}
+                        type="button"
+                      >
+                        <FolderOpen size={15} aria-hidden="true" />
+                        <span>{entry.name}</span>
+                      </button>
+                    ))
+                  : null}
+              </div>
             </div>
           </section>
         </div>

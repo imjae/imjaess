@@ -32,6 +32,16 @@
 
 ## Project-Specific Inputs
 
+- Scope references
+  - Type `@` in `Scope` to search files and folders under `Target project path`.
+  - Press Enter/Tab or click a suggestion to insert it.
+  - `Scope` can list `@filePath` and `@folderPath` references.
+  - Example: `@Assets/Scripts/UI/Trade/TradeInventoryPopup.cs @Assets/Scripts/UI/Trade`
+  - Use quotes for paths with spaces: `@"Assets/Folder With Spaces"`.
+  - File references attach clipped file content to agent context.
+  - Folder references attach a shallow directory listing only.
+  - References are limited to the task worktree.
+
 - 대상 프로젝트 경로
   - UI에서 `Target project path`로 입력한다.
   - 예: Unity 프로젝트 루트 또는 작업할 git repository 경로.

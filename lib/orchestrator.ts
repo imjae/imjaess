@@ -18,6 +18,7 @@ import { runShell } from "@/lib/shell";
 import { parseVerifierDecision } from "@/lib/decision";
 import type { AgentRole, Task } from "@/lib/types";
 import { buildManagedPrompt, compactHandoff, executionPolicy, withAgentTimeout } from "@/lib/execution-policy";
+import { buildScopeReferenceContext } from "@/lib/scope-references";
 
 function defaultAgentPlan(): string {
   return [
@@ -28,11 +29,12 @@ function defaultAgentPlan(): string {
   ].join("\n");
 }
 
-function taskBrief(task: Task, round: number, brokerBrief: string): string {
+function taskBrief(task: Task, round: number, brokerBrief: string, scopeReferenceContext = ""): string {
   return [
     `Task: ${task.title}`,
     `Goal: ${task.goal}`,
     `Scope: ${task.scope}`,
+    scopeReferenceContext,
     `Target project: ${task.targetProjectPath}`,
     `Agent plan:\n${task.agentPlan || defaultAgentPlan()}`,
     `Round: ${round}`,
@@ -136,6 +138,7 @@ export async function processTask(taskId: string): Promise<void> {
       failureReason: workspace.warning || null
     });
 
+    const scopeReferenceContext = await buildScopeReferenceContext(task.scope, workspace.path);
     const project = getProjectByPath(path.resolve(task.targetProjectPath));
     const verificationCommand = project?.verificationCommand || null;
     let brokerBrief = workspace.warning || "";
@@ -145,7 +148,7 @@ export async function processTask(taskId: string): Promise<void> {
       updateTask(taskId, { status: "running", currentRound: round });
       const refreshedTask = getTask(taskId) || task;
       const researcherPrompt = [
-        taskBrief(refreshedTask, round, brokerBrief),
+        taskBrief(refreshedTask, round, brokerBrief, scopeReferenceContext),
         "Collect only the facts needed for this task: relevant files, likely entry points, constraints, commands, and risks.",
         "Do not implement. Do not review another agent. End with evidence that the broker can pass to an implementer."
       ].join("\n\n");
@@ -169,7 +172,7 @@ export async function processTask(taskId: string): Promise<void> {
       });
 
       const implementerPrompt = [
-        taskBrief(refreshedTask, round, brokerBrief),
+        taskBrief(refreshedTask, round, brokerBrief, scopeReferenceContext),
         `Broker evidence pack:\n${evidencePack}`,
         "Implement only from the broker evidence pack and the task brief.",
         "Do not speculate about tester behavior. End with a concise private handoff summary for the broker."
@@ -209,7 +212,7 @@ export async function processTask(taskId: string): Promise<void> {
       });
 
       const testerPrompt = [
-        taskBrief(refreshedTask, round, ""),
+        taskBrief(refreshedTask, round, "", scopeReferenceContext),
         `Broker implementation brief:\n${implementationBrief}`,
         "Test independently from implementation intent. Use run_shell if needed.",
         "Return what was tested, evidence, failures, and residual risk. Do not ask the implementer for clarification."
@@ -235,7 +238,7 @@ export async function processTask(taskId: string): Promise<void> {
 
       updateTask(taskId, { status: "verifying" });
       const verifierPrompt = [
-        taskBrief(refreshedTask, round, brokerBrief),
+        taskBrief(refreshedTask, round, brokerBrief, scopeReferenceContext),
         `Broker evidence pack:\n${evidencePack}`,
         `Broker implementation brief:\n${implementationBrief}`,
         `Broker test result:\n${testResult}`,
