@@ -1,0 +1,37 @@
+{
+  "name": "oh-my-codex-harness",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev --hostname 127.0.0.1",
+    "build": "next build",
+    "start": "next start --hostname 127.0.0.1",
+    "lint": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@notionhq/client": "^5.22.0",
+    "@openai/agents": "^0.11.4",
+    "better-sqlite3": "^12.10.0",
+    "lucide-react": "^0.468.0",
+    "next": "^16.2.6",
+    "openai": "^6.38.0",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "zod": "^4.1.13"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "eslint": "^9.39.1",
+    "eslint-config-next": "^16.2.6",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.6"
+  }
+}
