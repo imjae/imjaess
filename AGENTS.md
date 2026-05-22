@@ -59,11 +59,13 @@ npm.cmd test
 npm.cmd run build
 ```
 
-For Unity target projects, use the project-specific verification command from the task. A common Deluge-like default is:
+For Unity target projects, use the project-specific verification command from the task. The default Unity gate is the fast Codex-style C# compile check:
 
 ```powershell
 dotnet build Deluge.sln --no-restore
 ```
+
+For isolated Unity worktrees, generated `.sln` / `.csproj` files may be copied into the tester worktree and temporarily patched for added or removed `.cs` files before this command runs. Treat prefab, scene, and `.asset` edits as requiring static diff review plus manual Unity editor confirmation unless the task explicitly asks for batchmode.
 
 ## Security Notes
 

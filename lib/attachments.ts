@@ -11,12 +11,17 @@ const MIME_EXTENSIONS: Record<string, string> = {
   "image/webp": ".webp",
   "image/gif": ".gif"
 };
+const DEFAULT_ATTACHMENT_ROOT = path.join(/*turbopackIgnore: true*/ process.cwd(), ".data", "attachments");
 
 function attachmentRoot(): string {
-  const configuredPath = process.env.HARNESS_ATTACHMENT_DIR || ".data/attachments";
-  return path.isAbsolute(configuredPath)
-    ? configuredPath
-    : path.join(/* turbopackIgnore: true */ process.cwd(), configuredPath);
+  const configuredPath = process.env.HARNESS_ATTACHMENT_DIR?.trim();
+  if (!configuredPath) {
+    return DEFAULT_ATTACHMENT_ROOT;
+  }
+  if (!path.isAbsolute(configuredPath)) {
+    throw new Error("HARNESS_ATTACHMENT_DIR must be an absolute path.");
+  }
+  return configuredPath;
 }
 
 function cleanOriginalName(name: string): string {
@@ -45,10 +50,10 @@ export async function saveTaskImageAttachment(input: {
 
   const originalName = cleanOriginalName(input.file.name);
   const extension = MIME_EXTENSIONS[input.file.type];
-  const taskDir = path.join(attachmentRoot(), input.taskId);
+  const taskDir = path.join(/*turbopackIgnore: true*/ attachmentRoot(), input.taskId);
   fs.mkdirSync(taskDir, { recursive: true });
 
-  const storedPath = path.join(taskDir, `${randomUUID()}${extension}`);
+  const storedPath = path.join(/*turbopackIgnore: true*/ taskDir, `${randomUUID()}${extension}`);
   const bytes = Buffer.from(await input.file.arrayBuffer());
   fs.writeFileSync(storedPath, bytes, { flag: "wx" });
 

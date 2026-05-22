@@ -2,7 +2,15 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createTask, getTaskDetail, insertBrokerArtifact, insertVerification, resetDbForTests } from "@/lib/db";
+import {
+  createTask,
+  getProjectByPath,
+  getTaskDetail,
+  insertBrokerArtifact,
+  insertVerification,
+  resetDbForTests,
+  upsertProject
+} from "@/lib/db";
 import { createFollowUpTask } from "@/lib/follow-up";
 
 describe("follow-up tasks", () => {
@@ -20,6 +28,7 @@ describe("follow-up tasks", () => {
     const parent = createTask({
       title: "Fix trade UI",
       taskGroup: "Game Logic",
+      taskTags: ["Game Logic", "UI"],
       goal: "Fix price display",
       scope: "@Assets/Scripts/UI/Trade",
       targetProjectPath: "C:\\repo",
@@ -50,8 +59,34 @@ describe("follow-up tasks", () => {
 
     expect(followUp.parentTaskId).toBe(parent.id);
     expect(followUp.taskGroup).toBe("Game Logic");
+    expect(followUp.tags).toEqual(["Game Logic", "UI"]);
     expect(followUp.goal).toContain("Continue from the remaining verifier issue.");
     expect(followUp.goal).toContain("Parent verifier summary.");
     expect(getTaskDetail(parent.id)?.childTasks[0]?.id).toBe(followUp.id);
+  });
+
+  it("keeps legacy dotnet verification for follow-up tasks", () => {
+    const parent = createTask({
+      title: "Validate Unity effect",
+      taskGroup: "Graphic",
+      taskTags: ["Graphic"],
+      goal: "Validate effect setup",
+      scope: "@Assets",
+      targetProjectPath: "C:\\repo",
+      agentPlan: "Plan",
+      approvalGrant: false
+    });
+    upsertProject({
+      path: path.resolve("C:\\repo"),
+      verificationCommand: "dotnet build Deluge.sln --no-restore"
+    });
+
+    createFollowUpTask({
+      parentTaskId: parent.id,
+      message: "Re-run validation.",
+      approvalGrant: false
+    });
+
+    expect(getProjectByPath(path.resolve("C:\\repo"))?.verificationCommand).toBe("dotnet build Deluge.sln --no-restore");
   });
 });

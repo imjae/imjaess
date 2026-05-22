@@ -1,14 +1,16 @@
 import path from "node:path";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { createTask, listTaskGroups, listTasks, upsertProject } from "@/lib/db";
+import { createTask, listTaskGroups, listTaskTags, listTasks, upsertProject } from "@/lib/db";
 import { enqueueTask } from "@/lib/worker";
+import { normalizeVerificationCommand } from "@/lib/verification-command";
 
 export const dynamic = "force-dynamic";
 
 const createTaskSchema = z.object({
   title: z.string().min(1),
   taskGroup: z.string().optional().default(""),
+  taskTags: z.array(z.string()).optional().default([]),
   goal: z.string().min(1),
   scope: z.string().optional().default(""),
   targetProjectPath: z.string().min(1),
@@ -18,19 +20,25 @@ const createTaskSchema = z.object({
 });
 
 export async function GET(): Promise<NextResponse> {
-  return NextResponse.json({ tasks: listTasks(), taskGroups: listTaskGroups().map((group) => group.name) });
+  return NextResponse.json({
+    tasks: listTasks(),
+    taskTags: listTaskTags().map((tag) => tag.name),
+    taskGroups: listTaskGroups().map((group) => group.name)
+  });
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
   const body = createTaskSchema.parse(await request.json());
   const targetProjectPath = path.resolve(body.targetProjectPath);
+  const verificationCommand = normalizeVerificationCommand(body.verificationCommand);
   upsertProject({
     path: targetProjectPath,
-    verificationCommand: body.verificationCommand || null
+    verificationCommand
   });
   const task = createTask({
     title: body.title,
     taskGroup: body.taskGroup.trim(),
+    taskTags: body.taskTags,
     goal: body.goal,
     scope: body.scope,
     targetProjectPath,

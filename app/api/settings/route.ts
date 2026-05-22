@@ -8,13 +8,17 @@ export const dynamic = "force-dynamic";
 
 const roleSchema = z.enum(["researcher", "implementer", "tester", "verifier"]);
 const providerSchema = z.enum(["openai", "codex-cli", "mock"]);
+const reasoningEffortSchema = z.enum(["default", "none", "minimal", "low", "medium", "high", "xhigh"]);
+const serviceTierSchema = z.enum(["default", "auto", "fast"]);
 
 const settingsSchema = z.object({
   settings: z.array(
     z.object({
       role: roleSchema,
       provider: providerSchema,
-      model: z.string().min(1)
+      model: z.string().min(1),
+      reasoningEffort: reasoningEffortSchema.optional().default("default"),
+      serviceTier: serviceTierSchema.optional().default("default")
     })
   )
 });
@@ -31,7 +35,9 @@ export async function PUT(request: Request): Promise<NextResponse> {
       provider: setting.provider,
       model: isValidModelForProvider(setting.provider, setting.model)
         ? setting.model
-        : defaultModelForProvider(setting.provider)
+        : defaultModelForProvider(setting.provider),
+      reasoningEffort: setting.reasoningEffort,
+      serviceTier: setting.serviceTier
     })
   );
   return NextResponse.json({ settings, modelCatalog: modelCatalog() });

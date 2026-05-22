@@ -12,7 +12,7 @@ import {
   updateTask,
   upsertProject
 } from "@/lib/db";
-import { maxAgentRounds, modelFor, providerFor } from "@/lib/config";
+import { maxAgentRounds, modelFor, providerFor, reasoningEffortFor, serviceTierFor } from "@/lib/config";
 import { runAgent } from "@/lib/agents";
 import { commitWorkspaceChanges, createAgentWorkspace, getDiffSummary, mergeIntoIntegration } from "@/lib/git";
 import { runShell } from "@/lib/shell";
@@ -20,6 +20,16 @@ import { parseVerifierDecision } from "@/lib/decision";
 import type { AgentRole, Task } from "@/lib/types";
 import { buildManagedPrompt, compactHandoff, executionPolicy, withAgentTimeout } from "@/lib/execution-policy";
 import { buildScopeReferenceContext } from "@/lib/scope-references";
+import {
+  isUnityDotnetVerificationCommand,
+  normalizeVerificationCommand,
+  verificationTimeoutMs
+} from "@/lib/verification-command";
+import {
+  formatUnityDotnetBootstrapResult,
+  prepareUnityDotnetVerificationWorkspace
+} from "@/lib/unity-dotnet-bootstrap";
+import { cleanupSingleTaskWorktrees, cleanupSpecificWorktree } from "@/lib/worktree-cleanup";
 
 function defaultAgentPlan(): string {
   return [
@@ -70,8 +80,10 @@ async function runRole(input: {
 }): Promise<string> {
   const model = modelFor(input.role);
   const provider = providerFor(input.role);
+  const reasoningEffort = reasoningEffortFor(input.role);
+  const serviceTier = serviceTierFor(input.role);
   const attachmentPaths = listTaskAttachments(input.task.id).map((attachment) => attachment.storedPath);
-  const policy = executionPolicy();
+  const policy = executionPolicy(input.role);
   const managed = buildManagedPrompt({
     role: input.role,
     prompt: input.prompt,
@@ -82,6 +94,8 @@ async function runRole(input: {
     role: input.role,
     provider,
     model,
+    reasoningEffort,
+    serviceTier,
     round: input.round,
     prompt: managed.prompt,
     contextBudgetChars: policy.contextBudgetChars,
@@ -93,18 +107,23 @@ async function runRole(input: {
   });
 
   try {
+    const abortController = new AbortController();
     const output = await withAgentTimeout(
       runAgent({
         role: input.role,
         provider,
         model,
+        reasoningEffort,
+        serviceTier,
         prompt: managed.prompt,
         taskId: input.task.id,
         workspacePath: input.workspacePath,
         round: input.round,
-        attachmentPaths
+        attachmentPaths,
+        signal: abortController.signal
       }),
-      policy.timeBudgetMs
+      policy.timeBudgetMs,
+      () => abortController.abort()
     );
     finishAgentRun(agentRunId, output);
     return output;
@@ -138,8 +157,16 @@ export async function processTask(taskId: string): Promise<void> {
       verificationCommand: getProjectByPath(path.resolve(task.targetProjectPath))?.verificationCommand || null
     });
 
-    const project = getProjectByPath(path.resolve(task.targetProjectPath));
-    const verificationCommand = project?.verificationCommand || null;
+    const projectPath = path.resolve(task.targetProjectPath);
+    const project = getProjectByPath(projectPath);
+    const savedVerificationCommand = project?.verificationCommand || null;
+    const verificationCommand = normalizeVerificationCommand(savedVerificationCommand);
+    if (verificationCommand !== (savedVerificationCommand?.trim() || "")) {
+      upsertProject({
+        path: projectPath,
+        verificationCommand
+      });
+    }
     let brokerBrief = "";
     let implementationBaseRef = "HEAD";
     const rounds = maxAgentRounds();
@@ -147,17 +174,25 @@ export async function processTask(taskId: string): Promise<void> {
     for (let round = 1; round <= rounds; round += 1) {
       updateTask(taskId, { status: "running", currentRound: round });
       const refreshedTask = getTask(taskId) || task;
-      const researcherWorkspace = await createAgentWorkspace({
-        taskId,
-        role: "researcher",
-        round,
-        targetProjectPath: task.targetProjectPath,
-        baseRef: implementationBaseRef
-      });
+      const researcherWorkspace =
+        implementationBaseRef === "HEAD"
+          ? {
+              path: projectPath,
+              kind: "direct" as const,
+              branchName: null,
+              warning: "Researcher uses the target project directly because this read-only stage does not need a worktree."
+            }
+          : await createAgentWorkspace({
+              taskId,
+              role: "researcher",
+              round,
+              targetProjectPath: task.targetProjectPath,
+              baseRef: implementationBaseRef
+            });
       const scopeReferenceContext = await buildScopeReferenceContext(task.scope, researcherWorkspace.path);
       const researcherPrompt = [
         taskBrief(refreshedTask, round, brokerBrief, scopeReferenceContext),
-        `Your isolated worktree: ${researcherWorkspace.path}`,
+        `Your assigned workspace: ${researcherWorkspace.path}`,
         researcherWorkspace.branchName ? `Your branch: ${researcherWorkspace.branchName}` : "",
         "Collect only the facts needed for this task: relevant files, likely entry points, constraints, commands, and risks.",
         "Do not implement. Do not review another agent. End with evidence that the broker can pass to an implementer."
@@ -228,14 +263,26 @@ export async function processTask(taskId: string): Promise<void> {
         targetProjectPath: task.targetProjectPath,
         baseRef: implementationCommit.ref
       });
+      const verificationPreparation =
+        verificationCommand && isUnityDotnetVerificationCommand(verificationCommand)
+          ? await prepareUnityDotnetVerificationWorkspace({
+              sourceProjectPath: projectPath,
+              workspacePath: testerWorkspace.path,
+              implementationRef: implementationCommit.ref,
+              implementationCommitted: implementationCommit.committed
+            })
+          : null;
+      const verificationPreparationSummary = verificationPreparation
+        ? formatUnityDotnetBootstrapResult(verificationPreparation)
+        : "";
       const commandResult = verificationCommand
         ? await runShell({
             taskId,
-            agentRole: "verifier",
+            agentRole: "tester",
             command: verificationCommand,
             cwd: testerWorkspace.path,
             workspacePath: testerWorkspace.path,
-            timeoutMs: 180_000
+            timeoutMs: verificationTimeoutMs(verificationCommand)
           })
         : null;
       const implementationBrief = brokerArtifact({
@@ -252,6 +299,7 @@ export async function processTask(taskId: string): Promise<void> {
           `Implementation commit: ${implementationCommit.summary}`,
           `Tester worktree: ${testerWorkspace.path}`,
           testerWorkspace.branchName ? `Tester branch: ${testerWorkspace.branchName}` : "",
+          verificationPreparationSummary,
           `Diff summary:\n${diffSummary}`,
           commandResult
             ? `Verification command result:\nCommand: ${commandResult.command}\nExit code: ${commandResult.exitCode}`
@@ -292,20 +340,16 @@ export async function processTask(taskId: string): Promise<void> {
       });
 
       updateTask(taskId, { status: "verifying" });
-      const verifierWorkspace = await createAgentWorkspace({
-        taskId,
-        role: "verifier",
-        round,
-        targetProjectPath: task.targetProjectPath,
-        baseRef: implementationCommit.ref
-      });
+      const verifierWorkspace = implementerWorkspace;
       const verifierPrompt = [
         taskBrief(refreshedTask, round, brokerBrief, scopeReferenceContext),
-        `Your isolated verifier worktree: ${verifierWorkspace.path}`,
+        `Your assigned verifier workspace: ${verifierWorkspace.path}`,
         verifierWorkspace.branchName ? `Your branch: ${verifierWorkspace.branchName}` : "",
+        "This verifier stage reuses the clean implementation worktree instead of creating another role worktree.",
         `Broker evidence pack:\n${evidencePack}`,
         `Broker implementation brief:\n${implementationBrief}`,
         `Broker test result:\n${testResult}`,
+        verificationPreparationSummary,
         commandResult
           ? `Verification command: ${commandResult.command}\nExit code: ${commandResult.exitCode}\nSTDOUT:\n${commandResult.stdout}\nSTDERR:\n${commandResult.stderr}`
           : "No verification command configured. Judge from agent outputs and diff summary.",
@@ -322,6 +366,11 @@ export async function processTask(taskId: string): Promise<void> {
         branchName: verifierWorkspace.branchName
       });
       const parsed = parseVerifierDecision(verifierOutput);
+      await cleanupSpecificWorktree({
+        targetProjectPath: task.targetProjectPath,
+        worktreePath: testerWorkspace.path,
+        branchName: testerWorkspace.branchName
+      });
       insertVerification({
         taskId,
         round,
@@ -335,7 +384,8 @@ export async function processTask(taskId: string): Promise<void> {
         const mergeResult = await mergeIntoIntegration({
           targetProjectPath: task.targetProjectPath,
           sourceRef: implementerWorkspace.branchName || implementationCommit.ref,
-          taskId
+          taskId,
+          taskTitle: refreshedTask.title
         });
         updateTask(taskId, { status: "done", failureReason: null, worktreePath: mergeResult.path });
         brokerArtifact({
@@ -351,6 +401,12 @@ export async function processTask(taskId: string): Promise<void> {
             `Worktree: ${mergeResult.path}`,
             mergeResult.output
           ].join("\n")
+        });
+        await cleanupSingleTaskWorktrees({
+          task: {
+            ...refreshedTask,
+            status: "done"
+          }
         });
         finalStatus = "done";
         return;

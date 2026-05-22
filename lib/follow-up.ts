@@ -3,6 +3,7 @@ import { createTask, getProjectByPath, getTaskDetail, upsertProject } from "@/li
 import { enqueueTask } from "@/lib/worker";
 import { taskReportMarkdown } from "@/lib/task-report";
 import type { Task } from "@/lib/types";
+import { normalizeVerificationCommand } from "@/lib/verification-command";
 
 function clip(text: string, max: number): string {
   if (text.length <= max) {
@@ -34,8 +35,9 @@ export function createFollowUpTask(input: {
   }
 
   const targetProjectPath = path.resolve(parent.targetProjectPath);
-  const verificationCommand =
-    input.verificationCommand?.trim() || getProjectByPath(targetProjectPath)?.verificationCommand || null;
+  const verificationCommand = normalizeVerificationCommand(
+    input.verificationCommand?.trim() || getProjectByPath(targetProjectPath)?.verificationCommand || null
+  );
   upsertProject({
     path: targetProjectPath,
     verificationCommand
@@ -44,6 +46,7 @@ export function createFollowUpTask(input: {
   const task = createTask({
     parentTaskId: parent.id,
     taskGroup: parent.taskGroup,
+    taskTags: parent.tags,
     title: `Follow-up: ${parent.title}`,
     goal: followUpGoal({
       message: input.message,

@@ -8,7 +8,7 @@ const REPORT_TEXT = {
     status: "Status",
     decision: "Decision",
     taskId: "Task ID",
-    group: "Group",
+    group: "Tags",
     ungrouped: "Ungrouped",
     project: "Project",
     worktree: "Worktree",
@@ -39,7 +39,7 @@ const REPORT_TEXT = {
     status: "상태",
     decision: "판정",
     taskId: "Task ID",
-    group: "그룹",
+    group: "태그",
     ungrouped: "그룹 없음",
     project: "프로젝트",
     worktree: "Worktree",
@@ -119,7 +119,7 @@ export function taskReportMarkdown(
       : task.agentRuns
           .map(
             (run) =>
-              `- ${run.role}: ${run.provider}/${run.model}, ${rt(language, "round")} ${run.round}, ${run.status}, ${rt(
+              `- ${run.role}: ${run.provider}/${run.model}/${run.reasoningEffort}/${run.serviceTier}, ${rt(language, "round")} ${run.round}, ${run.status}, ${rt(
                 language,
                 "input"
               )} ${run.inputChars}, ${rt(language, "output")} ${run.outputChars}`
@@ -144,7 +144,7 @@ export function taskReportMarkdown(
     `${rt(language, "status")}: ${task.status}`,
     `${rt(language, "decision")}: ${latestVerification?.decision || "n/a"}`,
     `${rt(language, "taskId")}: ${task.id}`,
-    `${rt(language, "group")}: ${task.taskGroup || rt(language, "ungrouped")}`,
+    `${rt(language, "group")}: ${task.tags.length > 0 ? task.tags.join(", ") : task.taskGroup || rt(language, "ungrouped")}`,
     `${rt(language, "project")}: ${task.targetProjectPath}`,
     `${rt(language, "worktree")}: ${task.worktreePath || "n/a"}`,
     `${rt(language, "created")}: ${task.createdAt}`,

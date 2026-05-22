@@ -8,6 +8,7 @@ describe("taskReportMarkdown", () => {
       id: "task-1",
       parentTaskId: null,
       taskGroup: "Game Logic",
+      tags: ["Game Logic", "UI"],
       title: "Fix inventory",
       goal: "Fix the inventory bug.",
       scope: "Keep UI changes narrow.",
@@ -39,6 +40,8 @@ describe("taskReportMarkdown", () => {
           role: "researcher",
           provider: "openai",
           model: "gpt-5.5",
+          reasoningEffort: "default",
+          serviceTier: "default",
           round: 1,
           status: "done",
           contextBudgetChars: 12000,
@@ -85,7 +88,7 @@ describe("taskReportMarkdown", () => {
 
     const markdown = taskReportMarkdown(task);
     expect(markdown).toContain("# Task: Fix inventory");
-    expect(markdown).toContain("Group: Game Logic");
+    expect(markdown).toContain("Tags: Game Logic, UI");
     expect(markdown).toContain("effect.png");
     expect(markdown).toContain("Approved evidence");
     expect(markdown).toContain("Passed verification.");

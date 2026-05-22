@@ -13,11 +13,14 @@ export interface ManagedPrompt {
   wasTrimmed: boolean;
 }
 
-export function executionPolicy(): ExecutionPolicy {
+export function executionPolicy(role?: AgentRole): ExecutionPolicy {
   return {
     contextBudgetChars: positiveInt(process.env.AGENT_CONTEXT_BUDGET_CHARS, 12_000),
     outputBudgetChars: positiveInt(process.env.AGENT_OUTPUT_BUDGET_CHARS, 4_000),
-    timeBudgetMs: positiveInt(process.env.AGENT_TIME_BUDGET_MS, 300_000)
+    timeBudgetMs:
+      role === "implementer"
+        ? positiveInt(process.env.IMPLEMENTER_TIME_BUDGET_MS, 900_000)
+        : positiveInt(process.env.AGENT_TIME_BUDGET_MS, 300_000)
   };
 }
 
@@ -85,10 +88,11 @@ export function compactHandoff(text: string, policy: ExecutionPolicy): string {
   return clipMiddle(text.trim(), policy.outputBudgetChars).text;
 }
 
-export async function withAgentTimeout<T>(promise: Promise<T>, timeBudgetMs: number): Promise<T> {
+export async function withAgentTimeout<T>(promise: Promise<T>, timeBudgetMs: number, onTimeout?: () => void): Promise<T> {
   let timeout: NodeJS.Timeout | undefined;
   const timeoutPromise = new Promise<never>((_, reject) => {
     timeout = setTimeout(() => {
+      onTimeout?.();
       reject(new Error(`Agent slice exceeded ${timeBudgetMs}ms time budget.`));
     }, timeBudgetMs);
   });

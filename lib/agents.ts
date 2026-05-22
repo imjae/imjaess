@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import OpenAI from "openai";
-import type { AgentProvider, AgentRole } from "@/lib/types";
+import type { AgentProvider, AgentReasoningEffort, AgentRole, AgentServiceTier } from "@/lib/types";
 import type { ShellResult } from "@/lib/shell";
 import { shouldUseMockAgents } from "@/lib/config";
 import { insertShellLog } from "@/lib/db";
@@ -13,11 +13,28 @@ interface AgentInput {
   role: AgentRole;
   provider: AgentProvider;
   model: string;
+  reasoningEffort: AgentReasoningEffort;
+  serviceTier: AgentServiceTier;
   prompt: string;
   taskId: string;
   workspacePath: string;
   round: number;
   attachmentPaths?: string[];
+  signal?: AbortSignal;
+}
+
+function openAiReasoningEffort(effort: AgentReasoningEffort): "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | null {
+  return effort === "default" ? null : effort;
+}
+
+function openAiServiceTier(tier: AgentServiceTier): "auto" | "priority" | null {
+  if (tier === "auto") {
+    return "auto";
+  }
+  if (tier === "fast") {
+    return "priority";
+  }
+  return null;
 }
 
 interface ToolCall {
@@ -174,13 +191,22 @@ async function runOpenAiAgent(input: AgentInput): Promise<string> {
   let nextInput: unknown = input.prompt;
 
   for (let step = 0; step < 8; step += 1) {
-    const response = await client.responses.create({
+    const request = {
       model: input.model,
       instructions,
       input: nextInput as never,
       previous_response_id: previousResponseId,
       tools: tools as never
-    });
+    } as Parameters<typeof client.responses.create>[0];
+    const reasoningEffort = openAiReasoningEffort(input.reasoningEffort);
+    const serviceTier = openAiServiceTier(input.serviceTier);
+    if (reasoningEffort) {
+      request.reasoning = { effort: reasoningEffort };
+    }
+    if (serviceTier) {
+      request.service_tier = serviceTier;
+    }
+    const response = (await client.responses.create(request)) as unknown as { id: string };
 
     previousResponseId = response.id;
     const functionCalls = extractFunctionCalls(response);
@@ -305,6 +331,12 @@ async function runCodexCliAgent(input: AgentInput): Promise<string> {
   if (input.model && input.model !== "default") {
     args.push("--model", input.model);
   }
+  if (input.reasoningEffort !== "default") {
+    args.push("--config", `model_reasoning_effort="${input.reasoningEffort}"`);
+  }
+  if (input.serviceTier !== "default") {
+    args.push("--config", `service_tier="${input.serviceTier}"`);
+  }
 
   for (const attachmentPath of input.attachmentPaths || []) {
     if (fs.existsSync(attachmentPath)) {
@@ -338,7 +370,8 @@ async function runCodexCliAgent(input: AgentInput): Promise<string> {
       const child = spawn(codexPath, args, {
         cwd: input.workspacePath,
         stdio: ["pipe", "pipe", "pipe"],
-        windowsHide: true
+        windowsHide: true,
+        signal: input.signal
       });
 
       child.stdout.on("data", (chunk: Buffer) => {

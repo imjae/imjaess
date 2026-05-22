@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { modelFor, providerFor, shouldUseMockAgents } from "@/lib/config";
+import { modelFor, providerFor, reasoningEffortFor, serviceTierFor, shouldUseMockAgents } from "@/lib/config";
 import { resetDbForTests, upsertAgentSetting } from "@/lib/db";
 
 describe("provider config", () => {
@@ -18,6 +18,16 @@ describe("provider config", () => {
     delete process.env.IMPLEMENTER_MODEL;
     delete process.env.TESTER_MODEL;
     delete process.env.VERIFIER_MODEL;
+    delete process.env.AGENT_REASONING_EFFORT;
+    delete process.env.RESEARCHER_REASONING_EFFORT;
+    delete process.env.IMPLEMENTER_REASONING_EFFORT;
+    delete process.env.TESTER_REASONING_EFFORT;
+    delete process.env.VERIFIER_REASONING_EFFORT;
+    delete process.env.AGENT_SERVICE_TIER;
+    delete process.env.RESEARCHER_SERVICE_TIER;
+    delete process.env.IMPLEMENTER_SERVICE_TIER;
+    delete process.env.TESTER_SERVICE_TIER;
+    delete process.env.VERIFIER_SERVICE_TIER;
   });
 
   function useTempDb(): void {
@@ -40,9 +50,26 @@ describe("provider config", () => {
     upsertAgentSetting({
       role: "researcher",
       provider: "openai",
-      model: "gpt-5.5"
+      model: "gpt-5.5",
+      reasoningEffort: "high",
+      serviceTier: "fast"
     });
     expect(modelFor("researcher")).toBe("gpt-5.5");
+    expect(reasoningEffortFor("researcher")).toBe("high");
+    expect(serviceTierFor("researcher")).toBe("fast");
+  });
+
+  it("reads role-specific reasoning and speed defaults from the environment", () => {
+    useTempDb();
+    process.env.AGENT_REASONING_EFFORT = "low";
+    process.env.IMPLEMENTER_REASONING_EFFORT = "xhigh";
+    process.env.AGENT_SERVICE_TIER = "auto";
+    process.env.IMPLEMENTER_SERVICE_TIER = "fast";
+
+    expect(reasoningEffortFor("researcher")).toBe("low");
+    expect(reasoningEffortFor("implementer")).toBe("xhigh");
+    expect(serviceTierFor("researcher")).toBe("auto");
+    expect(serviceTierFor("implementer")).toBe("fast");
   });
 
   it("uses mock mode unless explicitly disabled", () => {

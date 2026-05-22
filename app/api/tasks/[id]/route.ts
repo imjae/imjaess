@@ -1,11 +1,32 @@
 import { NextResponse } from "next/server";
-import { deleteTask, getTaskDetail } from "@/lib/db";
+import { z } from "zod";
+import { deleteTask, getTaskDetail, replaceTaskTags } from "@/lib/db";
 import { removeQueuedTask, workerSnapshot } from "@/lib/worker";
 
 export const dynamic = "force-dynamic";
 
+const updateTaskSchema = z.object({
+  taskTags: z.array(z.string()).optional()
+});
+
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }): Promise<NextResponse> {
   const { id } = await context.params;
+  const task = getTaskDetail(id);
+  if (!task) {
+    return NextResponse.json({ error: "Task not found" }, { status: 404 });
+  }
+  return NextResponse.json({ task });
+}
+
+export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }): Promise<NextResponse> {
+  const { id } = await context.params;
+  const body = updateTaskSchema.parse(await request.json());
+  if (body.taskTags) {
+    const tags = replaceTaskTags(id, body.taskTags);
+    if (!tags) {
+      return NextResponse.json({ error: "Task not found" }, { status: 404 });
+    }
+  }
   const task = getTaskDetail(id);
   if (!task) {
     return NextResponse.json({ error: "Task not found" }, { status: 404 });

@@ -1,9 +1,12 @@
 import { processTask } from "@/lib/orchestrator";
+import { listProjects, listTasks } from "@/lib/db";
+import { cleanupWorktrees } from "@/lib/worktree-cleanup";
 
 type QueueState = {
   queue: string[];
   running: Set<string>;
   started: boolean;
+  lastCleanupAt: number;
 };
 
 const globalForWorker = globalThis as typeof globalThis & {
@@ -15,7 +18,8 @@ function state(): QueueState {
     globalForWorker.__harnessQueue = {
       queue: [],
       running: new Set<string>(),
-      started: false
+      started: false,
+      lastCleanupAt: 0
     };
   }
   return globalForWorker.__harnessQueue;
@@ -36,11 +40,30 @@ export function removeQueuedTask(taskId: string): void {
 
 export function startWorker(): void {
   const queueState = state();
+  void runMaintenanceCleanup(queueState);
   if (queueState.started) {
     return;
   }
   queueState.started = true;
   void tick();
+}
+
+async function runMaintenanceCleanup(queueState: QueueState): Promise<void> {
+  const now = Date.now();
+  if (now - queueState.lastCleanupAt < 60 * 60 * 1000) {
+    return;
+  }
+  queueState.lastCleanupAt = now;
+  try {
+    await cleanupWorktrees({
+      mode: "expired-blocked",
+      tasks: listTasks(),
+      projectPaths: listProjects().map((project) => project.path),
+      excludeTaskIds: [...queueState.queue, ...queueState.running]
+    });
+  } catch {
+    // Maintenance cleanup must never prevent task execution.
+  }
 }
 
 async function tick(): Promise<void> {

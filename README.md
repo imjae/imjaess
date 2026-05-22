@@ -40,6 +40,10 @@ TESTER_PROVIDER=openai
 TESTER_MODEL=gpt-5.4
 VERIFIER_PROVIDER=openai
 VERIFIER_MODEL=gpt-5.4
+
+AGENT_REASONING_EFFORT=default
+IMPLEMENTER_REASONING_EFFORT=high
+AGENT_SERVICE_TIER=default
 ```
 
 For ChatGPT-login Codex CLI calls, log in once with `codex login`, then select `codex-cli` in the web settings or use:
@@ -55,12 +59,16 @@ TESTER_PROVIDER=codex-cli
 TESTER_MODEL=default
 VERIFIER_PROVIDER=codex-cli
 VERIFIER_MODEL=default
+
+AGENT_REASONING_EFFORT=default
+IMPLEMENTER_REASONING_EFFORT=high
+AGENT_SERVICE_TIER=default
 ```
 
-Providers and model names are environment-driven so you can swap researcher, implementer, tester, and verifier independently.
+Providers, model names, reasoning effort, and service tier are environment-driven so you can swap researcher, implementer, tester, and verifier independently.
 Use `openai`, `codex-cli`, or `mock` as provider values. `codex-cli` runs `codex exec` inside the task worktree and can receive task images through Codex CLI image inputs. On Windows, shell execution may require `CODEX_CLI_SANDBOX=danger-full-access`; the harness still logs the outer Codex run and command execution events reported by Codex CLI JSON output.
 
-The web UI has an **Agent Settings** panel. Values saved there are stored in SQLite and take precedence over `.env.local` for future task runs. Models are selected from a provider-specific list rather than typed as free-form strings. Set all role models to `GPT-5.5` there if you want the full pipeline to use GPT-5.5.
+The web UI has an **Agent Settings** panel. Values saved there are stored in SQLite and take precedence over `.env.local` for future task runs. Models are selected from a provider-specific list rather than typed as free-form strings. Reasoning effort supports `default`, `none`, `minimal`, `low`, `medium`, `high`, and `xhigh`; speed supports `default`, `auto`, and `fast`. For OpenAI API calls, `fast` maps to the priority service tier. Set all role models to `GPT-5.5` there if you want the full pipeline to use GPT-5.5.
 
 ## Context Isolation
 
@@ -75,11 +83,12 @@ The default Codex-only flow intentionally prevents agents from seeing each other
 
 ## Unity Worktree Flow
 
-For Unity projects, the harness avoids opening or mutating every candidate branch in the same editor checkout:
+For Unity projects, the harness avoids mutating the editor checkout for implementation and validation:
 
-- Each role gets its own worktree under `.harness/worktrees/<task>/<round-role>`.
+- Read-only roles use the target checkout when they do not need a separate ref.
 - `implementer` changes are committed to `harness/<task>/implementer/rN`.
-- `tester` and `verifier` get separate worktrees based on that implementation commit, so they can inspect and run Unity/batchmode validation without sharing private agent context.
+- `tester` gets a worktree based on that implementation commit and runs the configured verification command there.
+- `verifier` judges from broker artifacts and command evidence, reusing the clean implementation worktree instead of creating another role worktree.
 - Only a `pass` verifier decision merges the implementation branch into `HARNESS_INTEGRATION_BRANCH`, which defaults to `imjae`.
 - Open Unity against the `imjae` integration branch/worktree for manual visual confirmation, then merge to `main` outside the harness when satisfied.
 
@@ -108,6 +117,7 @@ Each agent run is managed as a short sub-agent slice:
 - `AGENT_CONTEXT_BUDGET_CHARS` limits the prompt passed to one agent.
 - `AGENT_OUTPUT_BUDGET_CHARS` limits handoff text passed to the next agent.
 - `AGENT_TIME_BUDGET_MS` stops an agent slice that runs too long.
+- `IMPLEMENTER_TIME_BUDGET_MS` overrides the implementer slice budget; it defaults to 900000ms, or 15 minutes.
 - Agent logs show input size, output size, context budget, time budget, trimming, and timeout status.
 
 This keeps long tasks from loading one agent with all context, all roles, and all verification at once.
@@ -120,13 +130,13 @@ npm.cmd test
 npm.cmd run build
 ```
 
-For Deluge-like Unity projects, the default verification command in the UI is:
+For Unity projects, the default verification command in the UI uses the same fast C# compile gate Codex usually runs:
 
 ```powershell
 dotnet build Deluge.sln --no-restore
 ```
 
-Change it per task if the selected project needs a different gate.
+When this command runs from an isolated Unity worktree, the harness copies generated `.sln` / `.csproj` files from the source checkout into the tester worktree and temporarily patches added or removed `.cs` files into the copied project file. These generated files are verification inputs only and are not committed. Prefab, scene, and `.asset` changes are reported as residual Unity import risk; batchmode is not run unless you explicitly set a batchmode command for the task.
 
 ## Notion Sync
 

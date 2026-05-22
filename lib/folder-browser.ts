@@ -48,7 +48,7 @@ async function windowsRoots(): Promise<string[]> {
 async function rootsForPlatform(): Promise<string[]> {
   if (process.platform === "win32") {
     const roots = await windowsRoots();
-    return roots.length > 0 ? roots : [path.parse(process.cwd()).root];
+    return roots.length > 0 ? roots : ["C:\\"];
   }
   return ["/"];
 }
@@ -61,7 +61,7 @@ function parentFor(directoryPath: string): string | null {
 
 export async function browseFolders(requestedPath?: string): Promise<FolderBrowserResult> {
   const roots = await rootsForPlatform();
-  const fallbackPath = roots[0] || process.cwd();
+  const fallbackPath = roots[0] || (process.platform === "win32" ? "C:\\" : "/");
   const resolvedPath = path.resolve(requestedPath?.trim() || fallbackPath);
   const currentPath = (await directoryExists(resolvedPath)) ? resolvedPath : fallbackPath;
 
@@ -70,7 +70,7 @@ export async function browseFolders(requestedPath?: string): Promise<FolderBrows
     .filter((entry) => entry.isDirectory() && !ignoredDirectoryNames.has(entry.name.toLowerCase()))
     .map((entry) => ({
       name: entry.name,
-      path: path.join(currentPath, entry.name)
+      path: path.join(/*turbopackIgnore: true*/ currentPath, entry.name)
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
 

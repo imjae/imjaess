@@ -14,6 +14,15 @@ async function git(args: string[], cwd: string): Promise<string> {
   return result.stdout.trim();
 }
 
+async function gitSucceeds(args: string[], cwd: string): Promise<boolean> {
+  try {
+    await git(args, cwd);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function safeRefPart(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "item";
 }
@@ -218,6 +227,7 @@ export async function mergeIntoIntegration(input: {
   targetProjectPath: string;
   sourceRef: string;
   taskId: string;
+  taskTitle?: string;
 }): Promise<{
   path: string;
   branchName: string;
@@ -232,7 +242,43 @@ export async function mergeIntoIntegration(input: {
     };
   }
 
-  await git(["merge", "--no-ff", input.sourceRef, "-m", `Merge harness task ${input.taskId}`], workspace.path);
+  const title = input.taskTitle?.replace(/\s+/g, " ").trim() || input.taskId;
+  const message = `[Harness task] ${title}`;
+  const status = await git(["status", "--porcelain", "--", ".", ":(exclude).harness"], workspace.path);
+  if (status.trim()) {
+    const matchesSourceRef = await gitSucceeds(
+      ["diff", "--quiet", input.sourceRef, "--", ".", ":(exclude).harness"],
+      workspace.path
+    );
+    if (!matchesSourceRef) {
+      throw new Error(
+        [
+          `Integration worktree has local changes, so ${input.sourceRef} cannot be merged safely.`,
+          `Integration worktree: ${workspace.path}`,
+          "Commit, discard, or move those local changes before retrying this task."
+        ].join("\n")
+      );
+    }
+
+    await git(["add", "-A", "--", ".", ":(exclude).harness"], workspace.path);
+    if (await gitSucceeds(["diff", "--cached", "--quiet"], workspace.path)) {
+      const head = await git(["rev-parse", "--short", "HEAD"], workspace.path);
+      return {
+        path: workspace.path,
+        branchName: workspace.branchName,
+        output: `Integration worktree already matched ${input.sourceRef}; no merge commit was needed at ${head}.`
+      };
+    }
+    await git(["commit", "-m", message], workspace.path);
+    const head = await git(["rev-parse", "--short", "HEAD"], workspace.path);
+    return {
+      path: workspace.path,
+      branchName: workspace.branchName,
+      output: `Committed existing integration worktree changes matching ${input.sourceRef} into ${workspace.branchName} at ${head}.`
+    };
+  }
+
+  await git(["merge", "--no-ff", input.sourceRef, "-m", message], workspace.path);
   const head = await git(["rev-parse", "--short", "HEAD"], workspace.path);
   return {
     path: workspace.path,

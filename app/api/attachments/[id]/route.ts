@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { getTaskAttachment } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const { id } = await context.params;

@@ -11,12 +11,18 @@ export type AgentRole = "researcher" | "implementer" | "tester" | "verifier";
 
 export type AgentProvider = "openai" | "codex-cli" | "mock";
 
+export type AgentReasoningEffort = "default" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
+
+export type AgentServiceTier = "default" | "auto" | "fast";
+
 export type VerificationDecision = "pass" | "needs_fix" | "blocked";
 
 export interface AgentSetting {
   role: AgentRole;
   provider: AgentProvider;
   model: string;
+  reasoningEffort: AgentReasoningEffort;
+  serviceTier: AgentServiceTier;
   updatedAt: string;
 }
 
@@ -48,10 +54,18 @@ export interface TaskGroup {
   updatedAt: string;
 }
 
+export interface TaskTag {
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Task {
   id: string;
   parentTaskId: string | null;
+  /** @deprecated Use tags instead. Kept for legacy clients and reports. */
   taskGroup: string;
+  tags: string[];
   title: string;
   goal: string;
   scope: string;
@@ -82,6 +96,8 @@ export interface AgentRun {
   role: AgentRole;
   provider: AgentProvider;
   model: string;
+  reasoningEffort: AgentReasoningEffort;
+  serviceTier: AgentServiceTier;
   round: number;
   status: "running" | "done" | "failed";
   contextBudgetChars: number;
@@ -159,6 +175,7 @@ export interface TaskDetail extends Task {
 export interface CreateTaskInput {
   title: string;
   taskGroup?: string;
+  taskTags?: string[];
   goal: string;
   scope?: string;
   targetProjectPath: string;

@@ -225,6 +225,22 @@ button {
   gap: 12px;
 }
 
+.tag-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.tag-editor {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfbf8;
+  padding: 10px;
+}
+
 .settings-grid {
   display: grid;
   gap: 8px;
@@ -232,13 +248,24 @@ button {
 
 .role-setting {
   display: grid;
-  grid-template-columns: 94px 88px minmax(0, 1fr);
+  grid-template-columns: 94px 88px minmax(0, 1fr) 112px 88px;
   gap: 8px;
   align-items: center;
 }
 
+.inline-field {
+  display: grid;
+  gap: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.inline-field select {
+  width: 100%;
+}
+
 .model-description {
-  grid-column: 2 / 4;
+  grid-column: 2 / 6;
   color: var(--muted);
   font-size: 12px;
   line-height: 1.35;
@@ -757,6 +784,44 @@ button {
   white-space: nowrap;
 }
 
+.task-tag-shell,
+.task-group-tab-shell {
+  display: inline-flex;
+  align-items: center;
+  max-width: 220px;
+  min-width: 0;
+}
+
+.task-tag-shell .task-tag,
+.task-group-tab-shell .task-group-tab {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.tag-delete-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--line);
+  border-left: 0;
+  border-radius: 0 999px 999px 0;
+  background: #f4f6f2;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.task-group-tab-shell .tag-delete-btn {
+  height: 32px;
+}
+
+.tag-delete-btn:hover,
+.tag-delete-btn:focus-visible {
+  background: #f9dddd;
+  color: var(--danger);
+  outline: none;
+}
+
 .task-tag:hover,
 .task-tag.active {
   border-color: var(--accent);
@@ -817,16 +882,53 @@ button {
   gap: 10px;
   width: 100%;
   text-align: left;
-  padding: 12px;
+  padding: 12px 12px 12px calc(12px + var(--task-depth-indent, 0px));
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fcfcfb;
   cursor: pointer;
 }
 
+.task-tree {
+  display: grid;
+  gap: 8px;
+}
+
+.task-item.follow-up-task {
+  border-left: 3px solid #9bc7c1;
+  background: #f8fbfa;
+}
+
 .task-item.selected {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(13, 110, 110, 0.12);
+}
+
+.tree-toggle,
+.tree-toggle-spacer {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+}
+
+.tree-toggle {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #ffffff;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.tree-toggle:hover,
+.tree-toggle:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.follow-up-count {
+  color: #245c58;
 }
 
 .task-title {
@@ -1049,6 +1151,24 @@ button {
   max-height: 420px;
 }
 
+.original-output {
+  border-top: 1px solid var(--line);
+  background: #f7f7f4;
+}
+
+.original-output summary {
+  cursor: pointer;
+  padding: 9px 12px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.original-output pre {
+  border-top: 1px solid var(--line);
+  background: #fff;
+}
+
 .split {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1084,5 +1204,14 @@ button {
   .topbar {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .role-setting {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .role-name,
+  .model-description {
+    grid-column: 1 / 3;
   }
 }

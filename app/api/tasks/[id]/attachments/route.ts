@@ -3,6 +3,7 @@ import { listTaskAttachments } from "@/lib/db";
 import { saveTaskImageAttachment } from "@/lib/attachments";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }): Promise<NextResponse> {
   const { id } = await context.params;

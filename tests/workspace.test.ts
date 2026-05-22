@@ -52,10 +52,50 @@ describe("workspace isolation", () => {
     const merge = await mergeIntoIntegration({
       targetProjectPath: root,
       sourceRef: implementer.branchName || "HEAD",
-      taskId: "task-456"
+      taskId: "task-456",
+      taskTitle: "Fix trade popup"
     });
 
     expect(merge.branchName).toBe("imjae");
     expect(fs.readFileSync(path.join(merge.path, "README.md"), "utf8").replace(/\r\n/g, "\n")).toBe("changed\n");
+    expect(execFileSync("git", ["log", "-1", "--pretty=%s"], { cwd: merge.path, encoding: "utf8" }).trim()).toBe(
+      "[Harness task] Fix trade popup"
+    );
+  });
+
+  it("commits dirty integration worktree changes when they already match the implementation ref", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "harness-dirty-integration-"));
+    execFileSync("git", ["init"], { cwd: root });
+    execFileSync("git", ["config", "user.email", "harness@example.local"], { cwd: root });
+    execFileSync("git", ["config", "user.name", "Harness Test"], { cwd: root });
+    fs.writeFileSync(path.join(root, "README.md"), "base\n");
+    execFileSync("git", ["add", "README.md"], { cwd: root });
+    execFileSync("git", ["commit", "-m", "init"], { cwd: root });
+    execFileSync("git", ["branch", "-M", "imjae"], { cwd: root });
+
+    const implementer = await createAgentWorkspace({
+      taskId: "task-dirty",
+      role: "implementer",
+      round: 1,
+      targetProjectPath: root
+    });
+    fs.writeFileSync(path.join(implementer.path, "README.md"), "changed\n");
+    execFileSync("git", ["add", "README.md"], { cwd: implementer.path });
+    execFileSync("git", ["commit", "-m", "change"], { cwd: implementer.path });
+
+    fs.writeFileSync(path.join(root, "README.md"), "changed\n");
+    const merge = await mergeIntoIntegration({
+      targetProjectPath: root,
+      sourceRef: implementer.branchName || "HEAD",
+      taskId: "task-dirty",
+      taskTitle: "Follow-up repair"
+    });
+
+    expect(path.resolve(merge.path).toLowerCase()).toBe(path.resolve(root).toLowerCase());
+    expect(merge.output).toContain("Committed existing integration worktree changes");
+    expect(execFileSync("git", ["status", "--porcelain", "--", ".", ":(exclude).harness"], { cwd: root, encoding: "utf8" })).toBe("");
+    expect(execFileSync("git", ["log", "-1", "--pretty=%s"], { cwd: root, encoding: "utf8" }).trim()).toBe(
+      "[Harness task] Follow-up repair"
+    );
   });
 });

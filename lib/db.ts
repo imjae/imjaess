@@ -19,6 +19,7 @@ import type {
   TaskAttachment,
   TaskDetail,
   TaskGroup,
+  TaskTag,
   TaskStatus,
   Verification,
   VerificationDecision
@@ -92,6 +93,21 @@ function migrate(database: DatabaseType): void {
       updated_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS task_tags (
+      name TEXT PRIMARY KEY,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS task_tag_links (
+      task_id TEXT NOT NULL,
+      tag_name TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (task_id, tag_name),
+      FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+      FOREIGN KEY (tag_name) REFERENCES task_tags(name) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS task_attachments (
       id TEXT PRIMARY KEY,
       task_id TEXT NOT NULL,
@@ -140,6 +156,8 @@ function migrate(database: DatabaseType): void {
       role TEXT PRIMARY KEY,
       provider TEXT NOT NULL,
       model TEXT NOT NULL,
+      reasoning_effort TEXT NOT NULL DEFAULT 'default',
+      service_tier TEXT NOT NULL DEFAULT 'default',
       updated_at TEXT NOT NULL
     );
 
@@ -222,10 +240,24 @@ function migrate(database: DatabaseType): void {
     ["was_trimmed", "ALTER TABLE agent_runs ADD COLUMN was_trimmed INTEGER NOT NULL DEFAULT 0;"],
     ["timed_out", "ALTER TABLE agent_runs ADD COLUMN timed_out INTEGER NOT NULL DEFAULT 0;"],
     ["workspace_path", "ALTER TABLE agent_runs ADD COLUMN workspace_path TEXT;"],
-    ["branch_name", "ALTER TABLE agent_runs ADD COLUMN branch_name TEXT;"]
+    ["branch_name", "ALTER TABLE agent_runs ADD COLUMN branch_name TEXT;"],
+    ["reasoning_effort", "ALTER TABLE agent_runs ADD COLUMN reasoning_effort TEXT NOT NULL DEFAULT 'default';"],
+    ["service_tier", "ALTER TABLE agent_runs ADD COLUMN service_tier TEXT NOT NULL DEFAULT 'default';"]
   ];
   for (const [column, sql] of agentRunMigrations) {
     if (!agentRunColumnNames.has(column)) {
+      database.exec(sql);
+    }
+  }
+  const agentSettingColumnNames = new Set(
+    (database.prepare("PRAGMA table_info(agent_settings)").all() as Array<{ name: string }>).map((column) => column.name)
+  );
+  const agentSettingMigrations: Array<[string, string]> = [
+    ["reasoning_effort", "ALTER TABLE agent_settings ADD COLUMN reasoning_effort TEXT NOT NULL DEFAULT 'default';"],
+    ["service_tier", "ALTER TABLE agent_settings ADD COLUMN service_tier TEXT NOT NULL DEFAULT 'default';"]
+  ];
+  for (const [column, sql] of agentSettingMigrations) {
+    if (!agentSettingColumnNames.has(column)) {
       database.exec(sql);
     }
   }
@@ -243,6 +275,16 @@ function migrate(database: DatabaseType): void {
     SELECT DISTINCT TRIM(task_group), created_at, updated_at
     FROM tasks
     WHERE TRIM(task_group) <> '';
+
+    INSERT OR IGNORE INTO task_tags (name, created_at, updated_at)
+    SELECT DISTINCT TRIM(task_group), created_at, updated_at
+    FROM tasks
+    WHERE TRIM(task_group) <> '';
+
+    INSERT OR IGNORE INTO task_tag_links (task_id, tag_name, created_at)
+    SELECT id, TRIM(task_group), created_at
+    FROM tasks
+    WHERE TRIM(task_group) <> '';
   `);
 }
 
@@ -250,11 +292,36 @@ function boolFromDb(value: unknown): boolean {
   return value === 1 || value === true;
 }
 
+function normalizeTaskTags(tags: Array<string | null | undefined>): string[] {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const tag of tags) {
+    const trimmed = (tag || "").trim();
+    if (!trimmed || seen.has(trimmed)) {
+      continue;
+    }
+    seen.add(trimmed);
+    normalized.push(trimmed);
+  }
+  return normalized;
+}
+
+function listTaskTagNamesForTask(taskId: string): string[] {
+  return (
+    getDb()
+      .prepare("SELECT tag_name FROM task_tag_links WHERE task_id = ? ORDER BY tag_name COLLATE NOCASE ASC")
+      .all(taskId) as Array<{ tag_name: string }>
+  ).map((row) => row.tag_name);
+}
+
 function mapTask(row: Record<string, unknown>): Task {
+  const tags = listTaskTagNamesForTask(String(row.id));
+  const legacyGroup = row.task_group ? String(row.task_group) : "";
   return {
     id: String(row.id),
     parentTaskId: row.parent_task_id ? String(row.parent_task_id) : null,
-    taskGroup: row.task_group ? String(row.task_group) : "",
+    taskGroup: legacyGroup || tags[0] || "",
+    tags,
     title: String(row.title),
     goal: String(row.goal),
     scope: String(row.scope),
@@ -277,6 +344,8 @@ function mapAgentRun(row: Record<string, unknown>): AgentRun {
     role: String(row.role) as AgentRole,
     provider: String(row.provider || "openai") as AgentProvider,
     model: String(row.model),
+    reasoningEffort: String(row.reasoning_effort || "default") as AgentRun["reasoningEffort"],
+    serviceTier: String(row.service_tier || "default") as AgentRun["serviceTier"],
     round: Number(row.round),
     status: String(row.status) as AgentRun["status"],
     contextBudgetChars: Number(row.context_budget_chars || 0),
@@ -312,6 +381,8 @@ function mapAgentSetting(row: Record<string, unknown>): AgentSetting {
     role: String(row.role) as AgentSetting["role"],
     provider: String(row.provider) as AgentProvider,
     model: String(row.model),
+    reasoningEffort: String(row.reasoning_effort || "default") as AgentSetting["reasoningEffort"],
+    serviceTier: String(row.service_tier || "default") as AgentSetting["serviceTier"],
     updatedAt: String(row.updated_at)
   };
 }
@@ -368,6 +439,14 @@ function mapProject(row: Record<string, unknown>): Project {
 }
 
 function mapTaskGroup(row: Record<string, unknown>): TaskGroup {
+  return {
+    name: String(row.name),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at)
+  };
+}
+
+function mapTaskTag(row: Record<string, unknown>): TaskTag {
   return {
     name: String(row.name),
     createdAt: String(row.created_at),
@@ -473,9 +552,87 @@ export function listTaskGroups(): TaskGroup[] {
   >[]).map(mapTaskGroup);
 }
 
+export function upsertTaskTag(name: string): TaskTag | null {
+  const trimmedName = name.trim();
+  if (!trimmedName) {
+    return null;
+  }
+  const timestamp = nowIso();
+  const database = getDb();
+  database
+    .prepare(
+      `INSERT INTO task_tags (name, created_at, updated_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT(name) DO UPDATE SET updated_at = excluded.updated_at`
+    )
+    .run(trimmedName, timestamp, timestamp);
+  upsertTaskGroup(trimmedName);
+  return mapTaskTag(database.prepare("SELECT * FROM task_tags WHERE name = ?").get(trimmedName) as Record<string, unknown>);
+}
+
+export function listTaskTags(): TaskTag[] {
+  return (getDb().prepare("SELECT * FROM task_tags ORDER BY name COLLATE NOCASE ASC").all() as Record<
+    string,
+    unknown
+  >[]).map(mapTaskTag);
+}
+
+export function deleteTaskTag(name: string): boolean {
+  const trimmedName = name.trim();
+  if (!trimmedName) {
+    return false;
+  }
+  const timestamp = nowIso();
+  const database = getDb();
+  const remove = database.transaction(() => {
+    const affectedTaskIds = (
+      database.prepare("SELECT task_id FROM task_tag_links WHERE tag_name = ?").all(trimmedName) as Array<{
+        task_id: string;
+      }>
+    ).map((row) => row.task_id);
+    const tagDelete = database.prepare("DELETE FROM task_tags WHERE name = ?").run(trimmedName);
+    const legacyGroupDelete = database.prepare("DELETE FROM task_groups WHERE name = ?").run(trimmedName);
+    for (const taskId of affectedTaskIds) {
+      const nextTag = database
+        .prepare("SELECT tag_name FROM task_tag_links WHERE task_id = ? ORDER BY tag_name COLLATE NOCASE ASC LIMIT 1")
+        .get(taskId) as { tag_name: string } | undefined;
+      database
+        .prepare("UPDATE tasks SET task_group = ?, updated_at = ? WHERE id = ?")
+        .run(nextTag?.tag_name || "", timestamp, taskId);
+    }
+    return tagDelete.changes + legacyGroupDelete.changes;
+  });
+  return remove() > 0;
+}
+
+export function replaceTaskTags(taskId: string, tags: string[]): string[] | null {
+  const task = getTask(taskId);
+  if (!task) {
+    return null;
+  }
+  const normalizedTags = normalizeTaskTags(tags);
+  const timestamp = nowIso();
+  const database = getDb();
+  const update = database.transaction(() => {
+    database.prepare("DELETE FROM task_tag_links WHERE task_id = ?").run(taskId);
+    for (const tag of normalizedTags) {
+      upsertTaskTag(tag);
+      database
+        .prepare("INSERT OR IGNORE INTO task_tag_links (task_id, tag_name, created_at) VALUES (?, ?, ?)")
+        .run(taskId, tag, timestamp);
+    }
+    database
+      .prepare("UPDATE tasks SET task_group = ?, updated_at = ? WHERE id = ?")
+      .run(normalizedTags[0] || "", timestamp, taskId);
+  });
+  update();
+  return normalizedTags;
+}
+
 export function createTask(input: {
   parentTaskId?: string | null;
   taskGroup?: string;
+  taskTags?: string[];
   title: string;
   goal: string;
   scope: string;
@@ -484,10 +641,12 @@ export function createTask(input: {
   approvalGrant: boolean;
 }): Task {
   const timestamp = nowIso();
+  const tags = normalizeTaskTags([...(input.taskTags || []), input.taskGroup]);
   const task: Task = {
     id: randomUUID(),
     parentTaskId: input.parentTaskId || null,
-    taskGroup: input.taskGroup?.trim() || "",
+    taskGroup: tags[0] || "",
+    tags,
     title: input.title,
     goal: input.goal,
     scope: input.scope,
@@ -501,32 +660,39 @@ export function createTask(input: {
     createdAt: timestamp,
     updatedAt: timestamp
   };
-  if (task.taskGroup) {
-    upsertTaskGroup(task.taskGroup);
-  }
-  getDb()
-    .prepare(
-      `INSERT INTO tasks
-      (id, parent_task_id, task_group, title, goal, scope, target_project_path, worktree_path, agent_plan, approval_grant, status, current_round, failure_reason, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-    .run(
-      task.id,
-      task.parentTaskId,
-      task.taskGroup,
-      task.title,
-      task.goal,
-      task.scope,
-      task.targetProjectPath,
-      task.worktreePath,
-      task.agentPlan,
-      task.approvalGrant ? 1 : 0,
-      task.status,
-      task.currentRound,
-      task.failureReason,
-      task.createdAt,
-      task.updatedAt
-    );
+  const database = getDb();
+  const insert = database.transaction(() => {
+    database
+      .prepare(
+        `INSERT INTO tasks
+        (id, parent_task_id, task_group, title, goal, scope, target_project_path, worktree_path, agent_plan, approval_grant, status, current_round, failure_reason, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        task.id,
+        task.parentTaskId,
+        task.taskGroup,
+        task.title,
+        task.goal,
+        task.scope,
+        task.targetProjectPath,
+        task.worktreePath,
+        task.agentPlan,
+        task.approvalGrant ? 1 : 0,
+        task.status,
+        task.currentRound,
+        task.failureReason,
+        task.createdAt,
+        task.updatedAt
+      );
+    for (const tag of task.tags) {
+      upsertTaskTag(tag);
+      database
+        .prepare("INSERT OR IGNORE INTO task_tag_links (task_id, tag_name, created_at) VALUES (?, ?, ?)")
+        .run(task.id, tag, timestamp);
+    }
+  });
+  insert();
   return task;
 }
 
@@ -672,6 +838,8 @@ export function createAgentRun(input: {
   role: AgentRole;
   provider: AgentProvider;
   model: string;
+  reasoningEffort: AgentRun["reasoningEffort"];
+  serviceTier: AgentRun["serviceTier"];
   round: number;
   prompt: string;
   contextBudgetChars: number;
@@ -685,8 +853,8 @@ export function createAgentRun(input: {
   getDb()
     .prepare(
       `INSERT INTO agent_runs
-      (id, task_id, role, provider, model, round, status, context_budget_chars, time_budget_ms, input_chars, was_trimmed, workspace_path, branch_name, input, started_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      (id, task_id, role, provider, model, reasoning_effort, service_tier, round, status, context_budget_chars, time_budget_ms, input_chars, was_trimmed, workspace_path, branch_name, input, started_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       id,
@@ -694,6 +862,8 @@ export function createAgentRun(input: {
       input.role,
       input.provider,
       input.model,
+      input.reasoningEffort,
+      input.serviceTier,
       input.round,
       "running",
       input.contextBudgetChars,
@@ -725,11 +895,11 @@ export function upsertAgentSetting(input: Omit<AgentSetting, "updatedAt">): Agen
   const updatedAt = nowIso();
   getDb()
     .prepare(
-      `INSERT INTO agent_settings (role, provider, model, updated_at)
-      VALUES (?, ?, ?, ?)
-      ON CONFLICT(role) DO UPDATE SET provider = excluded.provider, model = excluded.model, updated_at = excluded.updated_at`
+      `INSERT INTO agent_settings (role, provider, model, reasoning_effort, service_tier, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(role) DO UPDATE SET provider = excluded.provider, model = excluded.model, reasoning_effort = excluded.reasoning_effort, service_tier = excluded.service_tier, updated_at = excluded.updated_at`
     )
-    .run(input.role, input.provider, input.model, updatedAt);
+    .run(input.role, input.provider, input.model, input.reasoningEffort, input.serviceTier, updatedAt);
   return {
     ...input,
     updatedAt
