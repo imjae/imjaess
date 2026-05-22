@@ -8,6 +8,7 @@ import {
   deleteTaskTag,
   getTaskDetail,
   getDb,
+  getNotionSettings,
   insertShellLog,
   insertTaskAttachment,
   listTaskAttachments,
@@ -15,7 +16,9 @@ import {
   listTaskTags,
   replaceTaskTags,
   resetDbForTests,
-  updateTask
+  updateNotionSettings,
+  updateTask,
+  upsertImportedTask
 } from "@/lib/db";
 
 describe("task persistence", () => {
@@ -246,5 +249,69 @@ describe("task persistence", () => {
     const detail = getTaskDetail(parent.id);
     expect(detail?.childTasks.map((task) => task.id)).toEqual([child.id]);
     expect(getTaskDetail(child.id)?.parentTaskId).toBe(parent.id);
+  });
+
+  it("upserts imported Notion tasks with stable IDs and parent links", () => {
+    upsertImportedTask({
+      id: "parent-task",
+      title: "Imported parent",
+      goal: "Restore parent",
+      scope: "@Assets",
+      targetProjectPath: "C:\\repo",
+      agentPlan: "Plan",
+      approvalGrant: true,
+      status: "done",
+      currentRound: 1,
+      taskTags: ["Graphic"],
+      createdAt: "2026-05-21T00:00:00.000Z",
+      updatedAt: "2026-05-21T00:01:00.000Z",
+      notionPageId: "notion-parent",
+      notionUrl: "https://notion.local/parent"
+    });
+    upsertImportedTask({
+      id: "child-task",
+      parentTaskId: "parent-task",
+      title: "Imported child",
+      goal: "Restore child",
+      scope: "",
+      targetProjectPath: "C:\\repo",
+      agentPlan: "Plan",
+      approvalGrant: false,
+      status: "blocked",
+      currentRound: 2,
+      taskTags: ["Graphic", "Follow-up"],
+      failureReason: "Needs manual check",
+      notionPageId: "notion-child",
+      notionUrl: null,
+      verificationCommand: "npm test"
+    });
+
+    const parent = getTaskDetail("parent-task");
+    const child = getTaskDetail("child-task");
+    expect(parent?.childTasks.map((task) => task.id)).toEqual(["child-task"]);
+    expect(child?.parentTaskId).toBe("parent-task");
+    expect(child?.tags).toEqual(["Follow-up", "Graphic"]);
+    expect(child?.notionSync?.notionPageId).toBe("notion-child");
+  });
+
+  it("stores Notion task database ids with settings", () => {
+    updateNotionSettings({
+      parentPageId: "parent",
+      databaseId: "database",
+      dataSourceId: "data-source"
+    });
+
+    expect(getNotionSettings()).toMatchObject({
+      parentPageId: "parent",
+      databaseId: "database",
+      dataSourceId: "data-source"
+    });
+
+    updateNotionSettings({ parentPageId: "other-parent" });
+    expect(getNotionSettings()).toMatchObject({
+      parentPageId: "other-parent",
+      databaseId: null,
+      dataSourceId: null
+    });
   });
 });

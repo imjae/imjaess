@@ -102,6 +102,7 @@ const UI_TEXT = {
     notionParentPageId: "Parent page ID",
     notionPlaceholder: "Notion page ID to create task pages under",
     notionSync: "Notion Sync",
+    notionDatabase: "Task database",
     onlyImages: "Only image files can be attached.",
     originalOutput: "Original output",
     parallelTasks: "Parallel Tasks",
@@ -126,7 +127,7 @@ const UI_TEXT = {
     settings: "Settings",
     serviceTier: "Speed",
     shellTab: "Shell",
-    syncNotion: "Sync Notion",
+    syncNotionTasks: "Push Task DB",
     taskDetail: "Task Detail",
     taskGroup: "Task Tag",
     taskGroups: "Task tags",
@@ -134,6 +135,7 @@ const UI_TEXT = {
     title: "Title",
     tokenConfigured: "configured",
     tokenMissing: "missing NOTION_TOKEN in .env.local",
+    importNotionTasks: "Pull Task DB",
     ungrouped: "Untagged",
     uploadImages: "Uploading images...",
     verificationCommand: "Verification command",
@@ -194,6 +196,7 @@ const UI_TEXT = {
     notionParentPageId: "상위 페이지 ID",
     notionPlaceholder: "Task 페이지를 생성할 Notion 페이지 ID",
     notionSync: "Notion 동기화",
+    notionDatabase: "Task 데이터베이스",
     onlyImages: "이미지 파일만 첨부할 수 있습니다.",
     originalOutput: "원문 출력",
     parallelTasks: "병렬 Task",
@@ -218,7 +221,7 @@ const UI_TEXT = {
     settings: "설정",
     serviceTier: "속도",
     shellTab: "Shell",
-    syncNotion: "Notion 동기화",
+    syncNotionTasks: "Task DB 올리기",
     taskDetail: "Task 상세",
     taskGroup: "Task 태그",
     taskGroups: "Task 태그",
@@ -226,6 +229,7 @@ const UI_TEXT = {
     title: "제목",
     tokenConfigured: "설정됨",
     tokenMissing: ".env.local에 NOTION_TOKEN 없음",
+    importNotionTasks: "Task DB 불러오기",
     ungrouped: "태그 없음",
     uploadImages: "이미지 업로드 중...",
     verificationCommand: "검증 명령",
@@ -243,6 +247,8 @@ function tr(language: UiLanguage, key: UiTextKey): string {
 type ModelCatalog = Record<AgentSetting["provider"], ModelOption[]>;
 type NotionSettings = {
   parentPageId: string;
+  databaseId: string | null;
+  dataSourceId: string | null;
   updatedAt: string | null;
   tokenConfigured: boolean;
 };
@@ -507,13 +513,16 @@ export default function HomePage(): React.ReactElement {
   const [modelCatalog, setModelCatalog] = useState<ModelCatalog>({ openai: [], "codex-cli": [], mock: [] });
   const [notionSettings, setNotionSettings] = useState<NotionSettings>({
     parentPageId: "",
+    databaseId: null,
+    dataSourceId: null,
     updatedAt: null,
     tokenConfigured: false
   });
   const [isSubmitting, setSubmitting] = useState(false);
   const [isSavingSettings, setSavingSettings] = useState(false);
   const [isSavingNotion, setSavingNotion] = useState(false);
-  const [isSyncingNotion, setSyncingNotion] = useState(false);
+  const [isSyncingNotionTasks, setSyncingNotionTasks] = useState(false);
+  const [isImportingNotionTasks, setImportingNotionTasks] = useState(false);
   const [isUploadingAttachment, setUploadingAttachment] = useState(false);
   const [isCleaningWorktrees, setCleaningWorktrees] = useState(false);
   const [isSettingsOpen, setSettingsOpen] = useState(false);
@@ -998,22 +1007,43 @@ export default function HomePage(): React.ReactElement {
     }
   }
 
-  async function syncSelectedTaskToNotion(): Promise<void> {
-    if (!selectedTaskId) {
-      return;
-    }
-    setSyncingNotion(true);
+  async function syncAllTasksToNotionDb(): Promise<void> {
+    setSyncingNotionTasks(true);
     setError(null);
     try {
-      await jsonFetch("/api/notion/sync", {
+      await jsonFetch("/api/notion/tasks", {
         method: "POST",
-        body: JSON.stringify({ taskId: selectedTaskId, language })
+        body: JSON.stringify({ direction: "push", language })
       });
-      await refreshDetail(selectedTaskId);
+      await refreshNotionSettings();
+      await refreshTasks();
+      if (selectedTaskId) {
+        await refreshDetail(selectedTaskId);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setSyncingNotion(false);
+      setSyncingNotionTasks(false);
+    }
+  }
+
+  async function importTasksFromNotionDb(): Promise<void> {
+    setImportingNotionTasks(true);
+    setError(null);
+    try {
+      await jsonFetch("/api/notion/tasks", {
+        method: "POST",
+        body: JSON.stringify({ direction: "pull", language })
+      });
+      await refreshNotionSettings();
+      await refreshTasks();
+      if (selectedTaskId) {
+        await refreshDetail(selectedTaskId);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setImportingNotionTasks(false);
     }
   }
 
@@ -1588,10 +1618,6 @@ export default function HomePage(): React.ReactElement {
                   <Play size={16} aria-hidden="true" />
                   {tr(language, "run")}
                 </button>
-                <button className="btn" onClick={() => void syncSelectedTaskToNotion()} disabled={!selectedTaskId || isSyncingNotion}>
-                  <NotebookTabs size={16} aria-hidden="true" />
-                  {tr(language, "syncNotion")}
-                </button>
               </div>
               <div className="panel-body">
                 {!taskDetail ? (
@@ -1666,8 +1692,12 @@ export default function HomePage(): React.ReactElement {
                 language={language}
                 notionSettings={notionSettings}
                 isSavingNotion={isSavingNotion}
+                isSyncingNotionTasks={isSyncingNotionTasks}
+                isImportingNotionTasks={isImportingNotionTasks}
                 setNotionSettings={setNotionSettings}
                 saveNotionSettings={saveNotionSettings}
+                syncAllTasksToNotionDb={syncAllTasksToNotionDb}
+                importTasksFromNotionDb={importTasksFromNotionDb}
               />
             </div>
             <div className="settings-section">
@@ -1918,13 +1948,22 @@ function NotionSettingsForm(props: {
   language: UiLanguage;
   notionSettings: NotionSettings;
   isSavingNotion: boolean;
+  isSyncingNotionTasks: boolean;
+  isImportingNotionTasks: boolean;
   setNotionSettings: React.Dispatch<React.SetStateAction<NotionSettings>>;
   saveNotionSettings: (event: FormEvent) => Promise<void>;
+  syncAllTasksToNotionDb: () => Promise<void>;
+  importTasksFromNotionDb: () => Promise<void>;
 }): React.ReactElement {
+  const canUseNotionDatabase = props.notionSettings.tokenConfigured && Boolean(props.notionSettings.parentPageId.trim());
   return (
     <form className="form-grid" onSubmit={(event) => void props.saveNotionSettings(event)}>
       <div className="notice-line">
         Token: {props.notionSettings.tokenConfigured ? tr(props.language, "tokenConfigured") : tr(props.language, "tokenMissing")}
+      </div>
+      <div className="notice-line">
+        {tr(props.language, "notionDatabase")}:{" "}
+        {props.notionSettings.dataSourceId ? tr(props.language, "tokenConfigured") : "-"}
       </div>
       <div className="field">
         <label htmlFor="notion-parent">{tr(props.language, "notionParentPageId")}</label>
@@ -1945,6 +1984,26 @@ function NotionSettingsForm(props: {
         <NotebookTabs size={16} aria-hidden="true" />
         {tr(props.language, "saveNotionSettings")}
       </button>
+      <div className="button-row">
+        <button
+          className="btn"
+          disabled={!canUseNotionDatabase || props.isSyncingNotionTasks}
+          onClick={() => void props.syncAllTasksToNotionDb()}
+          type="button"
+        >
+          <NotebookTabs size={16} aria-hidden="true" />
+          {tr(props.language, "syncNotionTasks")}
+        </button>
+        <button
+          className="btn"
+          disabled={!canUseNotionDatabase || props.isImportingNotionTasks}
+          onClick={() => void props.importTasksFromNotionDb()}
+          type="button"
+        >
+          <RefreshCw size={16} aria-hidden="true" />
+          {tr(props.language, "importNotionTasks")}
+        </button>
+      </div>
     </form>
   );
 }

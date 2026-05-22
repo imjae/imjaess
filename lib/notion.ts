@@ -1,7 +1,51 @@
 import { Client } from "@notionhq/client";
 import type { BlockObjectRequest } from "@notionhq/client/build/src/api-endpoints";
-import { getNotionSettings, getNotionSync, getTaskDetail, upsertNotionSync } from "@/lib/db";
+import {
+  getNotionSettings,
+  getNotionSync,
+  getProjectByPath,
+  getTaskDetail,
+  listTasks,
+  updateNotionSettings,
+  upsertImportedTask,
+  upsertNotionSync
+} from "@/lib/db";
 import { taskReportMarkdown, type TaskReportLanguage } from "@/lib/task-report";
+import type { Task, TaskStatus } from "@/lib/types";
+
+const TASK_DATABASE_TITLE = "Oh My Codex Tasks";
+const TASK_STATUSES: TaskStatus[] = ["queued", "running", "reviewing", "verifying", "needs_fix", "done", "blocked"];
+
+type NotionPage = {
+  id: string;
+  url?: string;
+  object?: string;
+  archived?: boolean;
+  in_trash?: boolean;
+  parent?: { type?: string; data_source_id?: string };
+  properties?: Record<string, unknown>;
+};
+
+type ImportedTask = {
+  id: string;
+  parentTaskId: string | null;
+  taskTags: string[];
+  title: string;
+  goal: string;
+  scope: string;
+  targetProjectPath: string;
+  worktreePath: string | null;
+  agentPlan: string;
+  approvalGrant: boolean;
+  status: TaskStatus;
+  currentRound: number;
+  failureReason: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+  verificationCommand: string | null;
+  notionPageId: string;
+  notionUrl: string | null;
+};
 
 function notionClient(): Client {
   if (!process.env.NOTION_TOKEN) {
@@ -12,6 +56,13 @@ function notionClient(): Client {
 
 function normalizePageId(pageId: string): string {
   return pageId.trim().replace(/-/g, "");
+}
+
+function plainRichText(items: unknown): string {
+  if (!Array.isArray(items)) {
+    return "";
+  }
+  return items.map((item) => (typeof item?.plain_text === "string" ? item.plain_text : "")).join("");
 }
 
 function richText(text: string): Array<{ type: "text"; text: { content: string } }> {
@@ -26,6 +77,113 @@ function richText(text: string): Array<{ type: "text"; text: { content: string }
     });
   }
   return chunks.length > 0 ? chunks : [{ type: "text", text: { content: " " } }];
+}
+
+function titleProperty(text: string): unknown {
+  return { title: richText(text) };
+}
+
+function richTextProperty(text: string | null | undefined): unknown {
+  return { rich_text: richText(text || "") };
+}
+
+function selectProperty(name: string): unknown {
+  return { select: { name } };
+}
+
+function multiSelectProperty(names: string[]): unknown {
+  return { multi_select: names.filter(Boolean).map((name) => ({ name })) };
+}
+
+function dateProperty(value: string | null | undefined): unknown {
+  return value ? { date: { start: value } } : { date: null };
+}
+
+function taskDatabaseProperties(): Record<string, unknown> {
+  return {
+    Name: { title: {} },
+    "Task ID": { rich_text: {} },
+    "Parent Task ID": { rich_text: {} },
+    Status: {
+      select: {
+        options: TASK_STATUSES.map((name) => ({ name }))
+      }
+    },
+    Tags: { multi_select: {} },
+    Goal: { rich_text: {} },
+    Scope: { rich_text: {} },
+    "Target Project Path": { rich_text: {} },
+    "Worktree Path": { rich_text: {} },
+    "Agent Plan": { rich_text: {} },
+    "Approval Grant": { checkbox: {} },
+    "Current Round": { number: { format: "number" } },
+    "Failure Reason": { rich_text: {} },
+    "Created At": { date: {} },
+    "Updated At": { date: {} },
+    "Verification Command": { rich_text: {} }
+  };
+}
+
+function taskPageProperties(task: Task): Record<string, unknown> {
+  const verificationCommand = getProjectByPath(task.targetProjectPath)?.verificationCommand || "";
+  return {
+    Name: titleProperty(task.title),
+    "Task ID": richTextProperty(task.id),
+    "Parent Task ID": richTextProperty(task.parentTaskId || ""),
+    Status: selectProperty(task.status),
+    Tags: multiSelectProperty(task.tags || []),
+    Goal: richTextProperty(task.goal),
+    Scope: richTextProperty(task.scope),
+    "Target Project Path": richTextProperty(task.targetProjectPath),
+    "Worktree Path": richTextProperty(task.worktreePath || ""),
+    "Agent Plan": richTextProperty(task.agentPlan),
+    "Approval Grant": { checkbox: task.approvalGrant },
+    "Current Round": { number: task.currentRound },
+    "Failure Reason": richTextProperty(task.failureReason || ""),
+    "Created At": dateProperty(task.createdAt),
+    "Updated At": dateProperty(task.updatedAt),
+    "Verification Command": richTextProperty(verificationCommand)
+  };
+}
+
+function property(properties: Record<string, unknown> | undefined, name: string): Record<string, unknown> {
+  const value = properties?.[name];
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+}
+
+function titleValue(properties: Record<string, unknown> | undefined, name: string): string {
+  return plainRichText(property(properties, name).title);
+}
+
+function richTextValue(properties: Record<string, unknown> | undefined, name: string): string {
+  return plainRichText(property(properties, name).rich_text);
+}
+
+function selectValue(properties: Record<string, unknown> | undefined, name: string): string {
+  const select = property(properties, name).select as { name?: unknown } | null | undefined;
+  return typeof select?.name === "string" ? select.name : "";
+}
+
+function multiSelectValue(properties: Record<string, unknown> | undefined, name: string): string[] {
+  const values = property(properties, name).multi_select;
+  if (!Array.isArray(values)) {
+    return [];
+  }
+  return values.map((item) => (typeof item?.name === "string" ? item.name : "")).filter(Boolean);
+}
+
+function checkboxValue(properties: Record<string, unknown> | undefined, name: string): boolean {
+  return property(properties, name).checkbox === true;
+}
+
+function numberValue(properties: Record<string, unknown> | undefined, name: string): number {
+  const value = property(properties, name).number;
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function dateValue(properties: Record<string, unknown> | undefined, name: string): string | null {
+  const date = property(properties, name).date as { start?: unknown } | null | undefined;
+  return typeof date?.start === "string" ? date.start : null;
 }
 
 function markdownToBlocks(markdown: string): BlockObjectRequest[] {
@@ -125,6 +283,209 @@ async function replaceChildren(client: Client, pageId: string, blocks: BlockObje
   }
 }
 
+function dataSourceFromDatabase(database: unknown): string | null {
+  const dataSources = (database as { data_sources?: Array<{ id?: string }> }).data_sources || [];
+  return typeof dataSources[0]?.id === "string" ? dataSources[0].id : null;
+}
+
+function isArchivedNotionObject(value: unknown): boolean {
+  const object = value as { archived?: unknown; in_trash?: unknown };
+  return object.archived === true || object.in_trash === true;
+}
+
+async function findTaskDatabases(client: Client, parentPageId: string): Promise<string[]> {
+  const databaseIds: string[] = [];
+  let cursor: string | undefined;
+  do {
+    const response = await client.blocks.children.list({
+      block_id: normalizePageId(parentPageId),
+      start_cursor: cursor
+    });
+    for (const block of response.results as Array<{ id: string; type?: string; child_database?: { title?: string } }>) {
+      if (block.type === "child_database" && block.child_database?.title === TASK_DATABASE_TITLE) {
+        databaseIds.push(block.id);
+      }
+    }
+    cursor = response.has_more ? response.next_cursor || undefined : undefined;
+  } while (cursor);
+  return databaseIds;
+}
+
+async function ensureTaskDataSource(client: Client): Promise<{ databaseId: string; dataSourceId: string }> {
+  const settings = getNotionSettings();
+  if (!settings.parentPageId) {
+    throw new Error("Notion parent page ID is not configured.");
+  }
+
+  if (settings.databaseId && settings.dataSourceId) {
+    try {
+      const [database, dataSource] = await Promise.all([
+        client.databases.retrieve({ database_id: settings.databaseId }),
+        client.dataSources.retrieve({ data_source_id: settings.dataSourceId })
+      ]);
+      if (!isArchivedNotionObject(database) && !isArchivedNotionObject(dataSource)) {
+        return { databaseId: settings.databaseId, dataSourceId: settings.dataSourceId };
+      }
+    } catch {
+      // Fall through and rediscover or recreate below.
+    }
+  }
+
+  const discoveredDatabaseIds = await findTaskDatabases(client, settings.parentPageId);
+  for (const discoveredDatabaseId of discoveredDatabaseIds) {
+    const database = await client.databases.retrieve({ database_id: discoveredDatabaseId });
+    const dataSourceId = dataSourceFromDatabase(database);
+    if (!isArchivedNotionObject(database) && dataSourceId) {
+      const dataSource = await client.dataSources.retrieve({ data_source_id: dataSourceId });
+      if (!isArchivedNotionObject(dataSource)) {
+        updateNotionSettings({
+          parentPageId: settings.parentPageId,
+          databaseId: discoveredDatabaseId,
+          dataSourceId
+        });
+        return { databaseId: discoveredDatabaseId, dataSourceId };
+      }
+    }
+  }
+
+  const database = await client.databases.create({
+    parent: { type: "page_id", page_id: normalizePageId(settings.parentPageId) },
+    title: richText(TASK_DATABASE_TITLE),
+    initial_data_source: {
+      properties: taskDatabaseProperties()
+    }
+  } as never);
+  const databaseId = database.id;
+  const dataSourceId = dataSourceFromDatabase(database);
+  if (!dataSourceId) {
+    throw new Error("Notion created the task database but did not return a data source ID.");
+  }
+  updateNotionSettings({
+    parentPageId: settings.parentPageId,
+    databaseId,
+    dataSourceId
+  });
+  return { databaseId, dataSourceId };
+}
+
+async function findTaskPage(client: Client, dataSourceId: string, taskId: string): Promise<NotionPage | null> {
+  const response = await client.dataSources.query({
+    data_source_id: dataSourceId,
+    filter: {
+      property: "Task ID",
+      rich_text: { equals: taskId }
+    },
+    page_size: 1
+  } as never);
+  const first = response.results.find((item) => item.object === "page") as NotionPage | undefined;
+  return first || null;
+}
+
+async function queryTaskPages(client: Client, dataSourceId: string): Promise<NotionPage[]> {
+  const pages: NotionPage[] = [];
+  let cursor: string | undefined;
+  do {
+    const response = await client.dataSources.query({
+      data_source_id: dataSourceId,
+      start_cursor: cursor,
+      page_size: 100
+    } as never);
+    pages.push(...(response.results.filter((item) => item.object === "page") as NotionPage[]));
+    cursor = response.has_more ? response.next_cursor || undefined : undefined;
+  } while (cursor);
+  return pages;
+}
+
+function pageToImportedTask(page: NotionPage): ImportedTask | null {
+  const props = page.properties;
+  const id = richTextValue(props, "Task ID").trim();
+  if (!id) {
+    return null;
+  }
+  const status = selectValue(props, "Status") as TaskStatus;
+  const safeStatus = TASK_STATUSES.includes(status) ? status : "queued";
+  return {
+    id,
+    parentTaskId: richTextValue(props, "Parent Task ID").trim() || null,
+    taskTags: multiSelectValue(props, "Tags"),
+    title: titleValue(props, "Name") || "Untitled Task",
+    goal: richTextValue(props, "Goal"),
+    scope: richTextValue(props, "Scope"),
+    targetProjectPath: richTextValue(props, "Target Project Path"),
+    worktreePath: richTextValue(props, "Worktree Path") || null,
+    agentPlan: richTextValue(props, "Agent Plan"),
+    approvalGrant: checkboxValue(props, "Approval Grant"),
+    status: safeStatus,
+    currentRound: numberValue(props, "Current Round"),
+    failureReason: richTextValue(props, "Failure Reason") || null,
+    createdAt: dateValue(props, "Created At"),
+    updatedAt: dateValue(props, "Updated At"),
+    verificationCommand: richTextValue(props, "Verification Command") || null,
+    notionPageId: page.id,
+    notionUrl: page.url || null
+  };
+}
+
+async function upsertTaskPage(input: {
+  client: Client;
+  dataSourceId: string;
+  task: Task;
+  blocks: BlockObjectRequest[];
+}): Promise<{ pageId: string; url: string | null }> {
+  const existingSync = getNotionSync(input.task.id);
+  let pageId = existingSync?.notionPageId;
+  let url = existingSync?.notionUrl || null;
+
+  if (pageId) {
+    try {
+      const page = (await input.client.pages.retrieve({ page_id: pageId })) as NotionPage;
+      const parentDataSourceId = page.parent?.type === "data_source_id" ? page.parent.data_source_id : null;
+      if (isArchivedNotionObject(page) || parentDataSourceId !== input.dataSourceId) {
+        pageId = undefined;
+        url = null;
+      }
+    } catch {
+      pageId = undefined;
+      url = null;
+    }
+  }
+
+  if (!pageId) {
+    const existingPage = await findTaskPage(input.client, input.dataSourceId, input.task.id);
+    pageId = existingPage?.id;
+    url = existingPage?.url || null;
+  }
+
+  if (!pageId) {
+    const page = await input.client.pages.create({
+      parent: { type: "data_source_id", data_source_id: input.dataSourceId },
+      properties: taskPageProperties(input.task),
+      children: input.blocks
+    } as never);
+    pageId = page.id;
+    url = "url" in page && typeof page.url === "string" ? page.url : null;
+  } else {
+    try {
+      const page = await input.client.pages.update({
+        page_id: pageId,
+        properties: taskPageProperties(input.task)
+      } as never);
+      url = "url" in page && typeof page.url === "string" ? page.url : url;
+      await replaceChildren(input.client, pageId, input.blocks);
+    } catch {
+      const page = await input.client.pages.create({
+        parent: { type: "data_source_id", data_source_id: input.dataSourceId },
+        properties: taskPageProperties(input.task),
+        children: input.blocks
+      } as never);
+      pageId = page.id;
+      url = "url" in page && typeof page.url === "string" ? page.url : null;
+    }
+  }
+
+  return { pageId, url };
+}
+
 export async function syncTaskToNotion(
   taskId: string,
   options: { language?: TaskReportLanguage } = {}
@@ -133,48 +494,64 @@ export async function syncTaskToNotion(
   if (!task) {
     throw new Error(`Task not found: ${taskId}`);
   }
-  const settings = getNotionSettings();
-  if (!settings.parentPageId) {
-    throw new Error("Notion parent page ID is not configured.");
-  }
 
   const client = notionClient();
+  const { dataSourceId } = await ensureTaskDataSource(client);
   const markdown = taskReportMarkdown(task, { language: options.language || "en" });
   const blocks = markdownToBlocks(markdown);
-  const existing = getNotionSync(taskId);
-
-  let pageId = existing?.notionPageId;
-  let url = existing?.notionUrl || null;
-
-  if (!pageId) {
-    const page = await client.pages.create({
-      parent: { page_id: normalizePageId(settings.parentPageId) },
-      properties: {
-        title: {
-          title: richText(task.title)
-        }
-      },
-      children: blocks
-    });
-    pageId = page.id;
-    url = "url" in page && typeof page.url === "string" ? page.url : null;
-  } else {
-    await client.pages.update({
-      page_id: pageId,
-      properties: {
-        title: {
-          title: richText(task.title)
-        }
-      }
-    });
-    await replaceChildren(client, pageId, blocks);
-  }
+  const result = await upsertTaskPage({ client, dataSourceId, task, blocks });
 
   upsertNotionSync({
     taskId,
-    notionPageId: pageId,
-    notionUrl: url
+    notionPageId: result.pageId,
+    notionUrl: result.url
   });
 
-  return { pageId, url, markdown };
+  return { pageId: result.pageId, url: result.url, markdown };
+}
+
+export async function syncAllTasksToNotion(
+  options: { language?: TaskReportLanguage } = {}
+): Promise<{ pushed: number; databaseId: string; dataSourceId: string }> {
+  const client = notionClient();
+  const { databaseId, dataSourceId } = await ensureTaskDataSource(client);
+  const tasks = listTasks();
+  for (const task of tasks) {
+    await syncTaskToNotion(task.id, options);
+  }
+  return { pushed: tasks.length, databaseId, dataSourceId };
+}
+
+export async function importTasksFromNotion(): Promise<{ imported: number; databaseId: string; dataSourceId: string }> {
+  const client = notionClient();
+  const { databaseId, dataSourceId } = await ensureTaskDataSource(client);
+  const pages = await queryTaskPages(client, dataSourceId);
+  const incoming = pages.map(pageToImportedTask).filter((task): task is ImportedTask => Boolean(task));
+  const pending = [...incoming];
+  const incomingIds = new Set(incoming.map((task) => task.id));
+  const imported = new Set<string>();
+
+  while (pending.length > 0) {
+    let progressed = false;
+    for (let index = 0; index < pending.length; index += 1) {
+      const task = pending[index];
+      const parentReady = !task.parentTaskId || imported.has(task.parentTaskId) || !incomingIds.has(task.parentTaskId);
+      if (!parentReady) {
+        continue;
+      }
+      upsertImportedTask(task);
+      imported.add(task.id);
+      pending.splice(index, 1);
+      progressed = true;
+      index -= 1;
+    }
+    if (!progressed) {
+      for (const task of pending.splice(0)) {
+        upsertImportedTask({ ...task, parentTaskId: null });
+        imported.add(task.id);
+      }
+    }
+  }
+
+  return { imported: imported.size, databaseId, dataSourceId };
 }

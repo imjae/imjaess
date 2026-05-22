@@ -164,6 +164,8 @@ function migrate(database: DatabaseType): void {
     CREATE TABLE IF NOT EXISTS notion_settings (
       id INTEGER PRIMARY KEY CHECK (id = 1),
       parent_page_id TEXT NOT NULL,
+      database_id TEXT,
+      data_source_id TEXT,
       updated_at TEXT NOT NULL
     );
 
@@ -258,6 +260,18 @@ function migrate(database: DatabaseType): void {
   ];
   for (const [column, sql] of agentSettingMigrations) {
     if (!agentSettingColumnNames.has(column)) {
+      database.exec(sql);
+    }
+  }
+  const notionSettingColumnNames = new Set(
+    (database.prepare("PRAGMA table_info(notion_settings)").all() as Array<{ name: string }>).map((column) => column.name)
+  );
+  const notionSettingMigrations: Array<[string, string]> = [
+    ["database_id", "ALTER TABLE notion_settings ADD COLUMN database_id TEXT;"],
+    ["data_source_id", "ALTER TABLE notion_settings ADD COLUMN data_source_id TEXT;"]
+  ];
+  for (const [column, sql] of notionSettingMigrations) {
+    if (!notionSettingColumnNames.has(column)) {
       database.exec(sql);
     }
   }
@@ -696,6 +710,110 @@ export function createTask(input: {
   return task;
 }
 
+export function upsertImportedTask(input: {
+  id: string;
+  parentTaskId?: string | null;
+  taskTags?: string[];
+  title: string;
+  goal: string;
+  scope: string;
+  targetProjectPath: string;
+  worktreePath?: string | null;
+  agentPlan: string;
+  approvalGrant: boolean;
+  status: TaskStatus;
+  currentRound: number;
+  failureReason?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  verificationCommand?: string | null;
+  notionPageId?: string | null;
+  notionUrl?: string | null;
+}): Task {
+  const existing = getTask(input.id);
+  const timestamp = nowIso();
+  const tags = normalizeTaskTags(input.taskTags || []);
+  const parentTaskId = input.parentTaskId && getTask(input.parentTaskId) ? input.parentTaskId : null;
+  const task: Task = {
+    id: input.id,
+    parentTaskId,
+    taskGroup: tags[0] || "",
+    tags,
+    title: input.title,
+    goal: input.goal,
+    scope: input.scope,
+    targetProjectPath: input.targetProjectPath,
+    worktreePath: input.worktreePath || null,
+    agentPlan: input.agentPlan,
+    approvalGrant: input.approvalGrant,
+    status: input.status,
+    currentRound: input.currentRound,
+    failureReason: input.failureReason || null,
+    createdAt: input.createdAt || existing?.createdAt || timestamp,
+    updatedAt: input.updatedAt || timestamp
+  };
+  const database = getDb();
+  const upsert = database.transaction(() => {
+    database
+      .prepare(
+        `INSERT INTO tasks
+        (id, parent_task_id, task_group, title, goal, scope, target_project_path, worktree_path, agent_plan, approval_grant, status, current_round, failure_reason, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          parent_task_id = excluded.parent_task_id,
+          task_group = excluded.task_group,
+          title = excluded.title,
+          goal = excluded.goal,
+          scope = excluded.scope,
+          target_project_path = excluded.target_project_path,
+          worktree_path = excluded.worktree_path,
+          agent_plan = excluded.agent_plan,
+          approval_grant = excluded.approval_grant,
+          status = excluded.status,
+          current_round = excluded.current_round,
+          failure_reason = excluded.failure_reason,
+          updated_at = excluded.updated_at`
+      )
+      .run(
+        task.id,
+        task.parentTaskId,
+        task.taskGroup,
+        task.title,
+        task.goal,
+        task.scope,
+        task.targetProjectPath,
+        task.worktreePath,
+        task.agentPlan,
+        task.approvalGrant ? 1 : 0,
+        task.status,
+        task.currentRound,
+        task.failureReason,
+        task.createdAt,
+        task.updatedAt
+      );
+    database.prepare("DELETE FROM task_tag_links WHERE task_id = ?").run(task.id);
+    for (const tag of tags) {
+      upsertTaskTag(tag);
+      database
+        .prepare("INSERT OR IGNORE INTO task_tag_links (task_id, tag_name, created_at) VALUES (?, ?, ?)")
+        .run(task.id, tag, timestamp);
+    }
+  });
+  upsert();
+  upsertProject({
+    path: task.targetProjectPath,
+    verificationCommand: input.verificationCommand || getProjectByPath(task.targetProjectPath)?.verificationCommand || null
+  });
+  if (input.notionPageId) {
+    upsertNotionSync({
+      taskId: task.id,
+      notionPageId: input.notionPageId,
+      notionUrl: input.notionUrl || null
+    });
+  }
+  return task;
+}
+
 export function listTasks(): Task[] {
   return (getDb().prepare("SELECT * FROM tasks ORDER BY created_at DESC").all() as Record<string, unknown>[]).map(
     mapTask
@@ -913,22 +1031,38 @@ export function getNotionSettings(): NotionSettings {
   const parentPageId = row?.parent_page_id ? String(row.parent_page_id) : process.env.NOTION_PARENT_PAGE_ID || "";
   return {
     parentPageId,
+    databaseId: row?.database_id ? String(row.database_id) : null,
+    dataSourceId: row?.data_source_id ? String(row.data_source_id) : null,
     updatedAt: row?.updated_at ? String(row.updated_at) : null,
     tokenConfigured: Boolean(process.env.NOTION_TOKEN)
   };
 }
 
-export function updateNotionSettings(input: { parentPageId: string }): NotionSettings {
+export function updateNotionSettings(input: {
+  parentPageId: string;
+  databaseId?: string | null;
+  dataSourceId?: string | null;
+}): NotionSettings {
+  const current = getNotionSettings();
   const updatedAt = nowIso();
+  const parentChanged = input.parentPageId !== current.parentPageId;
+  const databaseId = input.databaseId === undefined ? (parentChanged ? null : current.databaseId) : input.databaseId;
+  const dataSourceId = input.dataSourceId === undefined ? (parentChanged ? null : current.dataSourceId) : input.dataSourceId;
   getDb()
     .prepare(
-      `INSERT INTO notion_settings (id, parent_page_id, updated_at)
-      VALUES (1, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET parent_page_id = excluded.parent_page_id, updated_at = excluded.updated_at`
+      `INSERT INTO notion_settings (id, parent_page_id, database_id, data_source_id, updated_at)
+      VALUES (1, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        parent_page_id = excluded.parent_page_id,
+        database_id = excluded.database_id,
+        data_source_id = excluded.data_source_id,
+        updated_at = excluded.updated_at`
     )
-    .run(input.parentPageId, updatedAt);
+    .run(input.parentPageId, databaseId, dataSourceId, updatedAt);
   return {
     parentPageId: input.parentPageId,
+    databaseId,
+    dataSourceId,
     updatedAt,
     tokenConfigured: Boolean(process.env.NOTION_TOKEN)
   };

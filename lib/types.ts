@@ -28,6 +28,8 @@ export interface AgentSetting {
 
 export interface NotionSettings {
   parentPageId: string;
+  databaseId: string | null;
+  dataSourceId: string | null;
   updatedAt: string | null;
   tokenConfigured: boolean;
 }
