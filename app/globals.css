@@ -24,6 +24,8 @@ body {
   min-height: 100%;
   background: var(--bg);
   color: var(--ink);
+  scrollbar-color: rgba(202, 202, 196, 0.3) transparent;
+  scrollbar-width: thin;
   font-family:
     Inter,
     ui-sans-serif,
@@ -33,6 +35,31 @@ body {
     "Segoe UI",
     sans-serif;
   letter-spacing: 0;
+}
+
+html::-webkit-scrollbar,
+body::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+html::-webkit-scrollbar-track,
+body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+html::-webkit-scrollbar-thumb,
+body::-webkit-scrollbar-thumb {
+  background: rgba(202, 202, 196, 0.22);
+  background-clip: content-box;
+  border: 2px solid transparent;
+  border-radius: 999px;
+}
+
+html::-webkit-scrollbar-thumb:hover,
+body::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 177, 121, 0.42);
+  background-clip: content-box;
 }
 
 button,

@@ -4,6 +4,34 @@
     radial-gradient(circle at 20% 0%, rgba(65, 70, 78, 0.28), transparent 28%),
     linear-gradient(180deg, #191919 0%, #101010 100%);
   color: #f4f4f1;
+  scrollbar-color: rgba(202, 202, 196, 0.3) transparent;
+  scrollbar-width: thin;
+}
+
+.simpleShell :global(*) {
+  scrollbar-color: rgba(202, 202, 196, 0.3) transparent;
+  scrollbar-width: thin;
+}
+
+.simpleShell :global(*)::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.simpleShell :global(*)::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.simpleShell :global(*)::-webkit-scrollbar-thumb {
+  background: rgba(202, 202, 196, 0.22);
+  background-clip: content-box;
+  border: 2px solid transparent;
+  border-radius: 999px;
+}
+
+.simpleShell :global(*)::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 177, 121, 0.42);
+  background-clip: content-box;
 }
 
 .heroStage {
