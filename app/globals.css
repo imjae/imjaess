@@ -225,6 +225,47 @@ button {
   font-weight: 800;
 }
 
+.collapsible-section-title {
+  justify-content: space-between;
+}
+
+.section-title-label {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+}
+
+.section-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 20px;
+  border-radius: 999px;
+  background: #e9eeea;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+}
+
+.section-toggle {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.section-toggle:hover,
+.section-toggle:focus-visible {
+  background: #e9eeea;
+  color: var(--ink);
+}
+
 .notice-line {
   border: 1px solid var(--line);
   border-radius: 6px;

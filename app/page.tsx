@@ -140,6 +140,8 @@ const UI_TEXT = {
     submitPlannerAnswer: "Submit and Resume",
     syncNotionTasks: "Push Task DB",
     taskTimeline: "Task timeline",
+    collapseTaskTimeline: "Collapse task timeline",
+    expandTaskTimeline: "Expand task timeline",
     taskDetail: "Task Detail",
     taskGroup: "Task Tag",
     taskGroups: "Task tags",
@@ -235,6 +237,9 @@ const UI_TEXT = {
     serviceTier: "속도",
     shellTab: "Shell",
     syncNotionTasks: "Task DB 올리기",
+    taskTimeline: "Task 타임라인",
+    collapseTaskTimeline: "Task 타임라인 접기",
+    expandTaskTimeline: "Task 타임라인 펼치기",
     taskDetail: "Task 상세",
     taskGroup: "Task 태그",
     taskGroups: "Task 태그",
@@ -2566,6 +2571,11 @@ function TaskDetailView(props: {
   const allDetailTags = Array.from(new Set([...props.knownTaskTags, ...currentTags])).sort((a, b) => a.localeCompare(b));
   const timeline = buildTaskTimeline(props.task, props.language);
   const shouldAnswerPlanner = props.task.status === "waiting_for_user" && Boolean(props.plannerQuestions);
+  const [isTimelineCollapsed, setIsTimelineCollapsed] = useState(false);
+
+  useEffect(() => {
+    setIsTimelineCollapsed(false);
+  }, [props.task.id]);
 
   function toggleDetailTag(tag: string): void {
     const nextTags = currentTags.includes(tag) ? currentTags.filter((item) => item !== tag) : [...currentTags, tag];
@@ -2683,11 +2693,24 @@ function TaskDetailView(props: {
       ) : null}
 
       <section className="timeline-section">
-        <div className="section-title">
-          <Activity size={16} aria-hidden="true" />
-          {tr(props.language, "taskTimeline")}
+        <div className="section-title collapsible-section-title">
+          <span className="section-title-label">
+            <Activity size={16} aria-hidden="true" />
+            {tr(props.language, "taskTimeline")}
+            <span className="section-count">{timeline.length}</span>
+          </span>
+          <button
+            aria-expanded={!isTimelineCollapsed}
+            aria-label={tr(props.language, isTimelineCollapsed ? "expandTaskTimeline" : "collapseTaskTimeline")}
+            className="section-toggle"
+            onClick={() => setIsTimelineCollapsed((current) => !current)}
+            title={tr(props.language, isTimelineCollapsed ? "expandTaskTimeline" : "collapseTaskTimeline")}
+            type="button"
+          >
+            {isTimelineCollapsed ? <ChevronRight size={16} aria-hidden="true" /> : <ChevronDown size={16} aria-hidden="true" />}
+          </button>
         </div>
-        {timeline.length === 0 ? (
+        {isTimelineCollapsed ? null : timeline.length === 0 ? (
           <div className="empty">{tr(props.language, "noAgentRuns")}</div>
         ) : (
           <div className="timeline-list">
