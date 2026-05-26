@@ -22,7 +22,8 @@ const TASK_STATUSES: TaskStatus[] = [
   "waiting_for_user",
   "needs_fix",
   "done",
-  "blocked"
+  "blocked",
+  "canceled"
 ];
 const TASK_PLANNING_MODES: TaskPlanningMode[] = ["direct", "plan"];
 const TASK_VERIFICATION_MODES: TaskVerificationMode[] = ["fast", "balanced"];

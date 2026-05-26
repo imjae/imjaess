@@ -622,6 +622,29 @@
   margin-top: 2px;
 }
 
+.agentActions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.iconButton {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #f6d0c7;
+}
+
+.iconButton:hover {
+  border-color: rgba(255, 111, 111, 0.42);
+  background: rgba(255, 111, 111, 0.12);
+}
+
 .statusDot {
   width: 10px;
   height: 10px;
@@ -647,6 +670,10 @@
 .status-needs_fix,
 .status-blocked {
   background: #ff6f6f;
+}
+
+.status-canceled {
+  background: #9c928d;
 }
 
 .runRail {

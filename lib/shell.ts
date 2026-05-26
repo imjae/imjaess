@@ -31,6 +31,7 @@ export async function runShell(input: {
   cwd: string;
   workspacePath: string;
   timeoutMs?: number;
+  signal?: AbortSignal;
 }): Promise<ShellResult> {
   const cwd = path.resolve(input.cwd);
   assertInsideWorkspace(input.workspacePath, cwd);
@@ -45,7 +46,8 @@ export async function runShell(input: {
       shell: "powershell.exe",
       windowsHide: true,
       timeout: input.timeoutMs || 120_000,
-      maxBuffer: 1024 * 1024 * 10
+      maxBuffer: 1024 * 1024 * 10,
+      signal: input.signal
     });
     stdout = result.stdout;
     stderr = result.stderr;

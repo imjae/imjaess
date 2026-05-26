@@ -6,7 +6,8 @@ export type TaskStatus =
   | "waiting_for_user"
   | "needs_fix"
   | "done"
-  | "blocked";
+  | "blocked"
+  | "canceled";
 
 export type AgentRole = "researcher" | "planner" | "implementer" | "tester" | "verifier";
 

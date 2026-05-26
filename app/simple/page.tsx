@@ -20,6 +20,7 @@ import {
   Play,
   ShieldCheck,
   Sparkles,
+  StopCircle,
   Trash2,
   Workflow,
   X
@@ -108,7 +109,8 @@ const statusLabels: Record<Task["status"], string> = {
   waiting_for_user: "답변 대기",
   needs_fix: "수정 필요",
   done: "완료",
-  blocked: "차단됨"
+  blocked: "차단됨",
+  canceled: "중단됨"
 };
 
 const artifactLabels: Record<BrokerArtifact["kind"], string> = {
@@ -204,6 +206,10 @@ function latestArtifact(task: TaskDetail | null, kind: BrokerArtifact["kind"]): 
 
 function latestVerification(task: TaskDetail): Verification | null {
   return [...task.verifications].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] || null;
+}
+
+function canCancelTask(task: Task): boolean {
+  return ["queued", "running", "reviewing", "verifying", "waiting_for_user", "needs_fix"].includes(task.status);
 }
 
 function formatTime(value: string): string {
@@ -511,6 +517,16 @@ export default function SimplePage(): React.ReactElement {
     return data.task;
   }
 
+  async function cancelTask(taskId: string): Promise<void> {
+    setError(null);
+    try {
+      await jsonFetch(`/api/tasks/${taskId}/cancel`, { method: "POST" });
+      await refreshConversation();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   async function submitMessage(event?: FormEvent): Promise<void> {
     event?.preventDefault();
     const prompt = message.trim();
@@ -653,6 +669,7 @@ export default function SimplePage(): React.ReactElement {
           <ConversationTranscript
             activeTaskId={activeTask?.id || null}
             details={orderedDetails}
+            onCancelTask={cancelTask}
             plannerQuestions={plannerQuestions}
           />
           <form className={styles.composer} onSubmit={(event) => void submitMessage(event)}>
@@ -930,6 +947,7 @@ function BranchSelect(props: {
 function ConversationTranscript(props: {
   activeTaskId: string | null;
   details: TaskDetail[];
+  onCancelTask: (taskId: string) => Promise<void>;
   plannerQuestions: BrokerArtifact | null;
 }): React.ReactElement | null {
   if (props.details.length === 0) {
@@ -943,6 +961,7 @@ function ConversationTranscript(props: {
           isActive={task.id === props.activeTaskId}
           isRoot={index === 0}
           key={task.id}
+          onCancelTask={props.onCancelTask}
           plannerQuestions={task.id === props.activeTaskId ? props.plannerQuestions : latestArtifact(task, "plan_questions")}
           task={task}
         />
@@ -955,6 +974,7 @@ function TaskConversationItem(props: {
   task: TaskDetail;
   isRoot: boolean;
   isActive: boolean;
+  onCancelTask: (taskId: string) => Promise<void>;
   plannerQuestions: BrokerArtifact | null;
 }): React.ReactElement {
   const verification = latestVerification(props.task);
@@ -977,7 +997,20 @@ function TaskConversationItem(props: {
             <strong>{props.task.title}</strong>
             <span>{statusLabels[props.task.status]}</span>
           </div>
-          {hasActiveRun ? <LoaderCircle className={styles.spin} size={16} aria-hidden="true" /> : <Bot size={17} aria-hidden="true" />}
+          <div className={styles.agentActions}>
+            {canCancelTask(props.task) ? (
+              <button
+                aria-label="Cancel task"
+                className={styles.iconButton}
+                onClick={() => void props.onCancelTask(props.task.id)}
+                title="Cancel task"
+                type="button"
+              >
+                <StopCircle size={15} aria-hidden="true" />
+              </button>
+            ) : null}
+            {hasActiveRun ? <LoaderCircle className={styles.spin} size={16} aria-hidden="true" /> : <Bot size={17} aria-hidden="true" />}
+          </div>
         </div>
         <AgentRunRail runs={props.task.agentRuns} />
         {props.task.status === "waiting_for_user" && props.plannerQuestions ? (

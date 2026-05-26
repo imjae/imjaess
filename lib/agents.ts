@@ -163,7 +163,8 @@ async function runShellTool(input: AgentInput, call: ToolCall): Promise<ShellRes
       agentRole: input.role,
       command,
       cwd: input.workspacePath,
-      workspacePath: input.workspacePath
+      workspacePath: input.workspacePath,
+      signal: input.signal
     });
   } catch (error) {
     return { error: error instanceof Error ? error.message : String(error) };
@@ -216,7 +217,7 @@ async function runOpenAiAgent(input: AgentInput): Promise<string> {
     if (serviceTier) {
       request.service_tier = serviceTier;
     }
-    const response = (await client.responses.create(request)) as unknown as { id: string };
+    const response = (await client.responses.create(request, { signal: input.signal } as never)) as unknown as { id: string };
 
     previousResponseId = response.id;
     const functionCalls = extractFunctionCalls(response);

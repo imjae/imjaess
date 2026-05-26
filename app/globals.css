@@ -1167,6 +1167,11 @@ button {
   color: #7d201a;
 }
 
+.pill.canceled {
+  background: #e6e1dd;
+  color: #4e4540;
+}
+
 .workspace-path {
   display: block;
   color: var(--muted);

@@ -24,6 +24,7 @@ import {
   ShieldCheck,
   ShieldQuestion,
   SlidersHorizontal,
+  StopCircle,
   TerminalSquare,
   Trash2,
   Upload
@@ -73,6 +74,7 @@ const UI_TEXT = {
     cleanupExpiredBlockedWorktrees: "Cleanup expired blocked worktrees",
     cleanupFailedWorktrees: "Cleanup failed worktrees",
     cleanupSummary: "Cleanup summary",
+    cancelTask: "Cancel task",
     deleteTag: "Delete tag",
     done: "Done",
     dropImages: "Drop images here or click to attach",
@@ -183,6 +185,7 @@ const UI_TEXT = {
     cleanupExpiredBlockedWorktrees: "만료된 blocked worktree 정리",
     cleanupFailedWorktrees: "실패 worktree 정리",
     cleanupSummary: "정리 결과",
+    cancelTask: "Task 중단",
     done: "완료",
     dropImages: "이미지를 드롭하거나 클릭해서 첨부",
     examples: "예시",
@@ -326,7 +329,8 @@ function statusLabel(status: Task["status"], language: UiLanguage): string {
       waiting_for_user: "Waiting",
       needs_fix: "Needs Fix",
       done: "Done",
-      blocked: "Blocked"
+      blocked: "Blocked",
+      canceled: "Canceled"
     },
     ko: {
       queued: "대기",
@@ -336,7 +340,8 @@ function statusLabel(status: Task["status"], language: UiLanguage): string {
       waiting_for_user: "답변 대기",
       needs_fix: "수정 필요",
       done: "완료",
-      blocked: "차단됨"
+      blocked: "차단됨",
+      canceled: "중단됨"
     }
   };
   return labels[language][status];
@@ -706,7 +711,17 @@ function localizedAgentOutput(text: string, language: UiLanguage): string {
 }
 
 function canDeleteTask(task: Task): boolean {
-  return task.status === "queued" || task.status === "waiting_for_user" || task.status === "done" || task.status === "blocked";
+  return (
+    task.status === "queued" ||
+    task.status === "waiting_for_user" ||
+    task.status === "done" ||
+    task.status === "blocked" ||
+    task.status === "canceled"
+  );
+}
+
+function canCancelTask(task: Task): boolean {
+  return ["queued", "running", "reviewing", "verifying", "waiting_for_user", "needs_fix"].includes(task.status);
 }
 
 function activeScopeMention(value: string, cursor: number): ScopeMention | null {
@@ -1325,6 +1340,22 @@ export default function HomePage(): React.ReactElement {
     await refreshDetail(selectedTaskId);
   }
 
+  async function cancelSelectedTask(task: Task): Promise<void> {
+    if (!canCancelTask(task)) {
+      return;
+    }
+    setError(null);
+    try {
+      await jsonFetch(`/api/tasks/${task.id}/cancel`, { method: "POST" });
+      await refreshTasks();
+      if (selectedTaskId === task.id) {
+        await refreshDetail(task.id);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   async function openTaskDetail(taskId: string): Promise<void> {
     setSelectedTaskId(taskId);
     setDetailModalOpen(true);
@@ -1591,6 +1622,19 @@ export default function HomePage(): React.ReactElement {
             <span className="pill">{verificationModeLabel(task.verificationMode, language)}</span>
             {hasChildren ? <span className="pill follow-up-count">{node.children.length} follow-up</span> : null}
             <span className="spacer" />
+            <button
+              aria-label={`Cancel ${task.title}`}
+              className="icon-action"
+              disabled={!canCancelTask(task)}
+              onClick={(event) => {
+                event.stopPropagation();
+                void cancelSelectedTask(task);
+              }}
+              title={canCancelTask(task) ? tr(language, "cancelTask") : ""}
+              type="button"
+            >
+              <StopCircle size={14} aria-hidden="true" />
+            </button>
             <button
               aria-label={`Delete ${task.title}`}
               className="icon-action"
@@ -1949,6 +1993,15 @@ export default function HomePage(): React.ReactElement {
                   <Play size={16} aria-hidden="true" />
                   {tr(language, "run")}
                 </button>
+                <button
+                  className="btn"
+                  onClick={() => taskDetail && void cancelSelectedTask(taskDetail)}
+                  disabled={!taskDetail || !canCancelTask(taskDetail)}
+                  type="button"
+                >
+                  <StopCircle size={16} aria-hidden="true" />
+                  {tr(language, "cancelTask")}
+                </button>
               </div>
               <div className="panel-body">
                 {!taskDetail ? (
@@ -1959,6 +2012,7 @@ export default function HomePage(): React.ReactElement {
                     task={taskDetail}
                     openDetail={() => setDetailModalOpen(true)}
                     startTask={startSelectedTask}
+                    cancelTask={() => cancelSelectedTask(taskDetail)}
                   />
                 )}
               </div>
@@ -2480,6 +2534,7 @@ function TaskSummaryPanel(props: {
   task: TaskDetail;
   openDetail: () => void;
   startTask: () => Promise<void>;
+  cancelTask: () => Promise<void>;
 }): React.ReactElement {
   const latestVerification = props.task.verifications.at(-1);
   const latestEvent = buildTaskTimeline(props.task, props.language).at(-1);
@@ -2522,6 +2577,10 @@ function TaskSummaryPanel(props: {
         <button className="btn" onClick={() => void props.startTask()} type="button">
           <Play size={16} aria-hidden="true" />
           {tr(props.language, "run")}
+        </button>
+        <button className="btn" disabled={!canCancelTask(props.task)} onClick={() => void props.cancelTask()} type="button">
+          <StopCircle size={16} aria-hidden="true" />
+          {tr(props.language, "cancelTask")}
         </button>
       </div>
     </div>

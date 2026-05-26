@@ -1,10 +1,10 @@
 import { processTask } from "@/lib/orchestrator";
-import { listProjects, listTasks } from "@/lib/db";
+import { listProjects, listTasks, updateTask } from "@/lib/db";
 import { cleanupWorktrees } from "@/lib/worktree-cleanup";
 
 type QueueState = {
   queue: string[];
-  running: Set<string>;
+  running: Map<string, AbortController>;
   started: boolean;
   lastCleanupAt: number;
 };
@@ -17,7 +17,7 @@ function state(): QueueState {
   if (!globalForWorker.__harnessQueue) {
     globalForWorker.__harnessQueue = {
       queue: [],
-      running: new Set<string>(),
+      running: new Map<string, AbortController>(),
       started: false,
       lastCleanupAt: 0
     };
@@ -36,6 +36,30 @@ export function enqueueTask(taskId: string): void {
 export function removeQueuedTask(taskId: string): void {
   const queueState = state();
   queueState.queue = queueState.queue.filter((queuedTaskId) => queuedTaskId !== taskId);
+}
+
+export function cancelTask(taskId: string): boolean {
+  const queueState = state();
+  const wasQueued = queueState.queue.includes(taskId);
+  if (wasQueued) {
+    queueState.queue = queueState.queue.filter((queuedTaskId) => queuedTaskId !== taskId);
+    updateTask(taskId, {
+      status: "canceled",
+      failureReason: "Task was canceled before it started."
+    });
+    return true;
+  }
+
+  const controller = queueState.running.get(taskId);
+  if (!controller) {
+    return false;
+  }
+  updateTask(taskId, {
+    status: "canceled",
+    failureReason: "Task cancellation requested. Waiting for the active agent to stop."
+  });
+  controller.abort();
+  return true;
 }
 
 export function startWorker(): void {
@@ -59,7 +83,7 @@ async function runMaintenanceCleanup(queueState: QueueState): Promise<void> {
       mode: "expired-blocked",
       tasks: listTasks(),
       projectPaths: listProjects().map((project) => project.path),
-      excludeTaskIds: [...queueState.queue, ...queueState.running]
+      excludeTaskIds: [...queueState.queue, ...queueState.running.keys()]
     });
   } catch {
     // Maintenance cleanup must never prevent task execution.
@@ -74,8 +98,9 @@ async function tick(): Promise<void> {
     if (!taskId) {
       continue;
     }
-    queueState.running.add(taskId);
-    void processTask(taskId).finally(() => {
+    const abortController = new AbortController();
+    queueState.running.set(taskId, abortController);
+    void processTask(taskId, abortController.signal).finally(() => {
       queueState.running.delete(taskId);
       setTimeout(() => void tick(), 10);
     });
@@ -92,6 +117,6 @@ export function workerSnapshot(): { queued: string[]; running: string[] } {
   const queueState = state();
   return {
     queued: [...queueState.queue],
-    running: [...queueState.running]
+    running: [...queueState.running.keys()]
   };
 }

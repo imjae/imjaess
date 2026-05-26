@@ -42,6 +42,28 @@ function defaultAgentPlan(): string {
   ].join("\n");
 }
 
+class TaskCanceledError extends Error {
+  constructor() {
+    super("Task was canceled by the user.");
+    this.name = "TaskCanceledError";
+  }
+}
+
+function assertNotCanceled(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw new TaskCanceledError();
+  }
+}
+
+function isCancellationError(error: unknown): boolean {
+  if (error instanceof TaskCanceledError) {
+    return true;
+  }
+  const maybe = error as { name?: unknown; code?: unknown; message?: unknown };
+  const message = typeof maybe.message === "string" ? maybe.message : "";
+  return maybe.name === "AbortError" || maybe.code === "ABORT_ERR" || /aborted|canceled by the user/i.test(message);
+}
+
 function taskBrief(task: Task, round: number, brokerBrief: string, scopeReferenceContext = ""): string {
   return [
     `Task: ${task.title}`,
@@ -80,7 +102,9 @@ async function runRole(input: {
   prompt: string;
   workspacePath: string;
   branchName?: string | null;
+  signal?: AbortSignal;
 }): Promise<string> {
+  assertNotCanceled(input.signal);
   const model = modelFor(input.role);
   const provider = providerFor(input.role);
   const reasoningEffort = reasoningEffortFor(input.role);
@@ -109,8 +133,15 @@ async function runRole(input: {
     branchName: input.branchName || null
   });
 
+  let abortFromParent: (() => void) | null = null;
   try {
     const abortController = new AbortController();
+    abortFromParent = () => abortController.abort();
+    if (input.signal?.aborted) {
+      abortController.abort();
+    } else {
+      input.signal?.addEventListener("abort", abortFromParent, { once: true });
+    }
     const output = await withAgentTimeout(
       runAgent({
         role: input.role,
@@ -128,16 +159,26 @@ async function runRole(input: {
       policy.timeBudgetMs,
       () => abortController.abort()
     );
+    input.signal?.removeEventListener("abort", abortFromParent);
+    assertNotCanceled(input.signal);
     finishAgentRun(agentRunId, output);
     return output;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    finishAgentRun(agentRunId, "", message, message.includes("time budget"));
+    const canceled = isCancellationError(error) || input.signal?.aborted;
+    const message = canceled ? "Task was canceled by the user." : error instanceof Error ? error.message : String(error);
+    finishAgentRun(agentRunId, "", message, !canceled && message.includes("time budget"));
+    if (canceled) {
+      throw new TaskCanceledError();
+    }
     throw error;
+  } finally {
+    if (abortFromParent) {
+      input.signal?.removeEventListener("abort", abortFromParent);
+    }
   }
 }
 
-export async function processTask(taskId: string): Promise<void> {
+export async function processTask(taskId: string, signal?: AbortSignal): Promise<void> {
   const task = getTask(taskId);
   if (!task) {
     throw new Error(`Task not found: ${taskId}`);
@@ -154,6 +195,7 @@ export async function processTask(taskId: string): Promise<void> {
   let finalStatus = "blocked";
 
   try {
+    assertNotCanceled(signal);
     updateTask(taskId, { status: "running", failureReason: null });
     upsertProject({
       path: path.resolve(task.targetProjectPath),
@@ -175,6 +217,7 @@ export async function processTask(taskId: string): Promise<void> {
     const rounds = maxAgentRounds();
 
     for (let round = 1; round <= rounds; round += 1) {
+      assertNotCanceled(signal);
       updateTask(taskId, { status: "running", currentRound: round });
       const refreshedTask = getTask(taskId) || task;
       const existingEvidencePack = getBrokerArtifact(taskId, round, "evidence_pack");
@@ -211,7 +254,8 @@ export async function processTask(taskId: string): Promise<void> {
           round,
           prompt: researcherPrompt,
           workspacePath: researcherWorkspace.path,
-          branchName: researcherWorkspace.branchName
+          branchName: researcherWorkspace.branchName,
+          signal
         });
         evidencePack = brokerArtifact({
           taskId,
@@ -252,7 +296,8 @@ export async function processTask(taskId: string): Promise<void> {
                   .filter(Boolean)
                   .join("\n\n"),
                 workspacePath: researcherWorkspace.path,
-                branchName: researcherWorkspace.branchName
+                branchName: researcherWorkspace.branchName,
+                signal
               });
               brokerArtifact({
                 taskId,
@@ -295,6 +340,7 @@ export async function processTask(taskId: string): Promise<void> {
         targetProjectPath: task.targetProjectPath,
         baseRef: implementationBaseRef
       });
+      assertNotCanceled(signal);
       updateTask(taskId, {
         worktreePath: implementerWorkspace.path,
         failureReason: implementerWorkspace.warning || null
@@ -316,8 +362,10 @@ export async function processTask(taskId: string): Promise<void> {
         round,
         prompt: implementerPrompt,
         workspacePath: implementerWorkspace.path,
-        branchName: implementerWorkspace.branchName
+        branchName: implementerWorkspace.branchName,
+        signal
       });
+      assertNotCanceled(signal);
 
       const diffSummary = await getDiffSummary(implementerWorkspace.path);
       const implementationCommit = await commitWorkspaceChanges(
@@ -346,6 +394,7 @@ export async function processTask(taskId: string): Promise<void> {
               implementationCommitted: implementationCommit.committed
             })
           : null;
+      assertNotCanceled(signal);
       const verificationPreparationSummary = verificationPreparation
         ? formatUnityDotnetBootstrapResult(verificationPreparation)
         : "";
@@ -356,9 +405,11 @@ export async function processTask(taskId: string): Promise<void> {
             command: verificationCommand,
             cwd: commandWorkspace.path,
             workspacePath: commandWorkspace.path,
-            timeoutMs: verificationTimeoutMs(verificationCommand)
+            timeoutMs: verificationTimeoutMs(verificationCommand),
+            signal
           })
         : null;
+      assertNotCanceled(signal);
       const implementationBrief = brokerArtifact({
         taskId,
         round,
@@ -408,7 +459,8 @@ export async function processTask(taskId: string): Promise<void> {
                   .filter(Boolean)
                   .join("\n\n"),
                 workspacePath: testerWorkspace.path,
-                branchName: testerWorkspace.branchName
+                branchName: testerWorkspace.branchName,
+                signal
               })
             ].join("\n\n")
           })
@@ -440,8 +492,10 @@ export async function processTask(taskId: string): Promise<void> {
         round,
         prompt: verifierPrompt,
         workspacePath: verifierWorkspace.path,
-        branchName: verifierWorkspace.branchName
+        branchName: verifierWorkspace.branchName,
+        signal
       });
+      assertNotCanceled(signal);
       const parsed = parseVerifierDecision(verifierOutput);
       if (testerWorkspace) {
         await cleanupSpecificWorktree({
@@ -512,6 +566,14 @@ export async function processTask(taskId: string): Promise<void> {
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    if (isCancellationError(error) || signal?.aborted) {
+      updateTask(taskId, {
+        status: "canceled",
+        failureReason: "Task was canceled by the user."
+      });
+      finalStatus = "canceled";
+      return;
+    }
     updateTask(taskId, {
       status: "blocked",
       failureReason: message

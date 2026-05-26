@@ -81,7 +81,7 @@ function taskMatchesMode(task: Task, mode: WorktreeCleanupMode, nowMs: number): 
     return task.status === "done";
   }
   if (mode === "failed") {
-    return task.status === "blocked" || task.status === "needs_fix";
+    return task.status === "blocked" || task.status === "needs_fix" || task.status === "canceled";
   }
   if (mode === "expired-blocked") {
     return taskIsExpiredBlocked(task, nowMs);
