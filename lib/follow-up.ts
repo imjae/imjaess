@@ -28,6 +28,7 @@ export function createFollowUpTask(input: {
   message: string;
   approvalGrant: boolean;
   verificationCommand?: string;
+  baseBranch?: string | null;
 }): Task {
   const parent = getTaskDetail(input.parentTaskId);
   if (!parent) {
@@ -54,6 +55,7 @@ export function createFollowUpTask(input: {
     }),
     scope: parent.scope,
     targetProjectPath,
+    baseBranch: input.baseBranch?.trim() || parent.baseBranch || null,
     agentPlan:
       "Follow-up task: use the parent task summary as background, verify repository state, then run isolated researcher/implementer/verifier roles.",
     planningMode: parent.planningMode,

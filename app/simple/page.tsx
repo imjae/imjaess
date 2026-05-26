@@ -1,12 +1,11 @@
 "use client";
 
 import type React from "react";
-import { ChangeEvent, FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, Fragment, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowUp,
   Bot,
   CheckCircle2,
-  ChevronDown,
   CircleAlert,
   CircleDashed,
   Clock3,
@@ -14,11 +13,9 @@ import {
   Gauge,
   GitBranch,
   ImageIcon,
-  Laptop,
   Link2,
   LoaderCircle,
   MessageSquareText,
-  Mic,
   Paperclip,
   Play,
   ShieldCheck,
@@ -36,6 +33,7 @@ import type {
   TaskVerificationMode,
   Verification
 } from "@/lib/types";
+import { repositoryName } from "@/lib/repository-name";
 import styles from "./simple.module.css";
 
 const defaultProjectPath = "D:\\dev\\Deluge";
@@ -44,6 +42,7 @@ const settingsStorageKey = "oh-my-codex-simple-settings";
 
 type SimpleSettings = {
   targetProjectPath: string;
+  baseBranch: string;
   planningMode: TaskPlanningMode;
   verificationMode: TaskVerificationMode;
   verificationCommand: string;
@@ -58,8 +57,43 @@ type TaskResponse = {
   task: TaskDetail;
 };
 
+type LocalBranch = {
+  name: string;
+  isCurrent: boolean;
+};
+
+type BranchesResponse = {
+  root: string;
+  branches: LocalBranch[];
+};
+
+type FolderBrowserEntry = {
+  name: string;
+  path: string;
+};
+
+type FolderBrowserResult = {
+  currentPath: string;
+  parentPath: string | null;
+  roots: string[];
+  entries: FolderBrowserEntry[];
+};
+
+type PathSuggestion = {
+  path: string;
+  type: "file" | "directory";
+  match: "exact" | "contains";
+};
+
+type ScopeMention = {
+  start: number;
+  end: number;
+  query: string;
+};
+
 const defaultSettings: SimpleSettings = {
   targetProjectPath: defaultProjectPath,
+  baseBranch: "",
   planningMode: "direct",
   verificationMode: "fast",
   verificationCommand: "",
@@ -122,6 +156,38 @@ function titleFromPrompt(prompt: string): string {
   return firstLine.length <= 72 ? firstLine : `${firstLine.slice(0, 69).trimEnd()}...`;
 }
 
+function normalizeTaskTags(input: string): string[] {
+  return Array.from(
+    new Set(
+      input
+        .split(/[\s,]+/)
+        .map((tag) => tag.trim().replace(/^#+/, ""))
+        .filter(Boolean)
+    )
+  );
+}
+
+function tailPath(text: string, max = 54): string {
+  if (text.length <= max) {
+    return text;
+  }
+  return `...${text.slice(-(max - 3))}`;
+}
+
+function activeScopeMention(value: string, cursor: number): ScopeMention | null {
+  const beforeCursor = value.slice(0, cursor);
+  const match = beforeCursor.match(/@(?:"([^"]*)$|'([^']*)$|`([^`]*)$|([^\s,;]*)$)/);
+  if (!match || match.index === undefined) {
+    return null;
+  }
+  const query = match[1] ?? match[2] ?? match[3] ?? match[4] ?? "";
+  return {
+    start: match.index,
+    end: cursor,
+    query: query.trim()
+  };
+}
+
 function userPromptFromTask(task: TaskDetail): string {
   const marker = "\n\nParent task context summary follows.";
   const markerIndex = task.goal.indexOf(marker);
@@ -138,14 +204,6 @@ function latestArtifact(task: TaskDetail | null, kind: BrokerArtifact["kind"]): 
 
 function latestVerification(task: TaskDetail): Verification | null {
   return [...task.verifications].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] || null;
-}
-
-function latestBranch(task: TaskDetail | null): string {
-  if (!task) {
-    return "main";
-  }
-  const runWithBranch = [...task.agentRuns].reverse().find((run) => Boolean(run.branchName));
-  return runWithBranch?.branchName || "main";
 }
 
 function formatTime(value: string): string {
@@ -212,6 +270,7 @@ function loadStoredSettings(): SimpleSettings {
     const parsed = JSON.parse(window.localStorage.getItem(settingsStorageKey) || "{}") as Partial<SimpleSettings>;
     return {
       targetProjectPath: parsed.targetProjectPath || defaultSettings.targetProjectPath,
+      baseBranch: parsed.baseBranch || "",
       planningMode: parsed.planningMode === "plan" ? "plan" : "direct",
       verificationMode: parsed.verificationMode === "balanced" ? "balanced" : "fast",
       verificationCommand: parsed.verificationCommand || "",
@@ -224,12 +283,25 @@ function loadStoredSettings(): SimpleSettings {
 
 export default function SimplePage(): React.ReactElement {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const messageInputRef = useRef<HTMLTextAreaElement | null>(null);
   const [message, setMessage] = useState("");
   const [conversationIds, setConversationIds] = useState<string[]>([]);
   const [taskDetails, setTaskDetails] = useState<TaskDetail[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [settings, setSettings] = useState<SimpleSettings>(defaultSettings);
+  const [tagInput, setTagInput] = useState("#SimpleUI");
   const [pendingImages, setPendingImages] = useState<File[]>([]);
+  const [localBranches, setLocalBranches] = useState<LocalBranch[]>([]);
+  const [branchError, setBranchError] = useState<string | null>(null);
+  const [isLoadingBranches, setLoadingBranches] = useState(false);
+  const [isFolderBrowserOpen, setFolderBrowserOpen] = useState(false);
+  const [isLoadingFolders, setLoadingFolders] = useState(false);
+  const [folderBrowser, setFolderBrowser] = useState<FolderBrowserResult | null>(null);
+  const [folderBrowserError, setFolderBrowserError] = useState<string | null>(null);
+  const [scopeMention, setScopeMention] = useState<ScopeMention | null>(null);
+  const [pathSuggestions, setPathSuggestions] = useState<PathSuggestion[]>([]);
+  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
+  const [isLoadingSuggestions, setLoadingSuggestions] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [isHydrated, setIsHydrated] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -238,7 +310,9 @@ export default function SimplePage(): React.ReactElement {
   const plannerQuestions = latestArtifact(activeTask, "plan_questions");
   const isAnsweringPlanner = activeTask?.status === "waiting_for_user" && Boolean(plannerQuestions);
   const canSend = message.trim().length > 0 && !isSending;
-  const branchLabel = latestBranch(activeTask);
+  const selectedBranch =
+    settings.baseBranch || localBranches.find((branch) => branch.isCurrent)?.name || localBranches[0]?.name || "";
+  const taskTags = normalizeTaskTags(tagInput);
 
   const orderedDetails = useMemo(() => {
     const byId = new Map(taskDetails.map((task) => [task.id, task]));
@@ -299,6 +373,86 @@ export default function SimplePage(): React.ReactElement {
     return () => window.clearInterval(interval);
   }, [conversationIds.join("|"), isHydrated]);
 
+  useEffect(() => {
+    if (!isHydrated || !settings.targetProjectPath.trim()) {
+      return;
+    }
+    const controller = new AbortController();
+    setLoadingBranches(true);
+    setBranchError(null);
+    void jsonFetch<BranchesResponse>(
+      `/api/git/branches?targetProjectPath=${encodeURIComponent(settings.targetProjectPath)}`,
+      { signal: controller.signal }
+    )
+      .then((data) => {
+        setLocalBranches(data.branches);
+        setSettings((current) => {
+          if (current.baseBranch && data.branches.some((branch) => branch.name === current.baseBranch)) {
+            return current;
+          }
+          return {
+            ...current,
+            baseBranch: data.branches.find((branch) => branch.isCurrent)?.name || data.branches[0]?.name || ""
+          };
+        });
+      })
+      .catch((err: unknown) => {
+        if (err instanceof DOMException && err.name === "AbortError") {
+          return;
+        }
+        setLocalBranches([]);
+        setBranchError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setLoadingBranches(false);
+        }
+      });
+    return () => controller.abort();
+  }, [isHydrated, settings.targetProjectPath]);
+
+  useEffect(() => {
+    if (!scopeMention) {
+      setPathSuggestions([]);
+      setSelectedSuggestionIndex(0);
+      setLoadingSuggestions(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      setLoadingSuggestions(true);
+      void jsonFetch<{ suggestions: PathSuggestion[] }>("/api/path-suggestions", {
+        method: "POST",
+        signal: controller.signal,
+        body: JSON.stringify({
+          targetProjectPath: settings.targetProjectPath,
+          query: scopeMention.query
+        })
+      })
+        .then((data) => {
+          setPathSuggestions(data.suggestions);
+          setSelectedSuggestionIndex(0);
+        })
+        .catch((err: unknown) => {
+          if (err instanceof DOMException && err.name === "AbortError") {
+            return;
+          }
+          setPathSuggestions([]);
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) {
+            setLoadingSuggestions(false);
+          }
+        });
+    }, 150);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [scopeMention, settings.targetProjectPath]);
+
   function addPendingImages(files: FileList | null): void {
     if (!files) {
       return;
@@ -321,15 +475,17 @@ export default function SimplePage(): React.ReactElement {
 
   async function createRootTask(prompt: string): Promise<Task> {
     const shouldDelayStart = settings.approvalGrant && pendingImages.length > 0;
+    const rootTaskTags = taskTags.length > 0 ? taskTags : ["Simple UI"];
     const data = await jsonFetch<{ task: Task }>("/api/tasks", {
       method: "POST",
       body: JSON.stringify({
         title: titleFromPrompt(prompt),
-        taskTags: ["Simple UI"],
-        taskGroup: "Simple UI",
+        taskTags: rootTaskTags,
+        taskGroup: rootTaskTags[0] || "",
         goal: prompt,
         scope: "Submitted from the Simple UI chat surface.",
         targetProjectPath: settings.targetProjectPath,
+        baseBranch: selectedBranch,
         planningMode: settings.planningMode,
         verificationMode: settings.verificationMode,
         verificationCommand: settings.verificationCommand,
@@ -346,6 +502,7 @@ export default function SimplePage(): React.ReactElement {
       method: "POST",
       body: JSON.stringify({
         message: prompt,
+        baseBranch: selectedBranch,
         verificationCommand: settings.verificationCommand,
         approvalGrant: shouldDelayStart ? false : settings.approvalGrant
       })
@@ -386,20 +543,93 @@ export default function SimplePage(): React.ReactElement {
   }
 
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
+    if (scopeMention) {
+      if (pathSuggestions.length > 0 && event.key === "ArrowDown") {
+        event.preventDefault();
+        setSelectedSuggestionIndex((current) => (current + 1) % pathSuggestions.length);
+        return;
+      }
+      if (pathSuggestions.length > 0 && event.key === "ArrowUp") {
+        event.preventDefault();
+        setSelectedSuggestionIndex((current) => (current - 1 + pathSuggestions.length) % pathSuggestions.length);
+        return;
+      }
+      if (pathSuggestions.length > 0 && (event.key === "Enter" || event.key === "Tab")) {
+        event.preventDefault();
+        insertScopeSuggestion(pathSuggestions[selectedSuggestionIndex]);
+        return;
+      }
+      if (event.key === "Escape") {
+        setScopeMention(null);
+        setPathSuggestions([]);
+        return;
+      }
+    }
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       void submitMessage();
     }
   }
 
+  function updateScopeMention(textArea: HTMLTextAreaElement): void {
+    setScopeMention(activeScopeMention(textArea.value, textArea.selectionStart));
+  }
+
+  function insertScopeSuggestion(suggestion: PathSuggestion): void {
+    if (!scopeMention) {
+      return;
+    }
+    const textArea = messageInputRef.current;
+    const needsQuotes = /\s/.test(suggestion.path);
+    const replacement = needsQuotes ? `@"${suggestion.path}"` : `@${suggestion.path}`;
+    const nextMessage = `${message.slice(0, scopeMention.start)}${replacement}${message.slice(scopeMention.end)}`;
+    const nextCursor = scopeMention.start + replacement.length;
+
+    setMessage(nextMessage);
+    setScopeMention(null);
+    setPathSuggestions([]);
+
+    window.setTimeout(() => {
+      textArea?.focus();
+      textArea?.setSelectionRange(nextCursor, nextCursor);
+    }, 0);
+  }
+
   function updateSettings(next: Partial<SimpleSettings>): void {
     setSettings((current) => ({ ...current, ...next }));
+  }
+
+  async function loadFolderBrowser(pathValue: string): Promise<void> {
+    setLoadingFolders(true);
+    setFolderBrowserError(null);
+    try {
+      const data = await jsonFetch<{ result: FolderBrowserResult }>("/api/folder-browser", {
+        method: "POST",
+        body: JSON.stringify({ path: pathValue })
+      });
+      setFolderBrowser(data.result);
+    } catch (err) {
+      setFolderBrowserError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoadingFolders(false);
+    }
+  }
+
+  function openFolderBrowser(): void {
+    setFolderBrowserOpen(true);
+    void loadFolderBrowser(settings.targetProjectPath);
+  }
+
+  function selectWorkspaceFolder(pathValue: string): void {
+    updateSettings({ targetProjectPath: pathValue, baseBranch: "" });
+    setFolderBrowserOpen(false);
   }
 
   function clearConversation(): void {
     setConversationIds([]);
     setTaskDetails([]);
     setMessage("");
+    setTagInput("#SimpleUI");
     setPendingImages([]);
     setError(null);
   }
@@ -419,7 +649,7 @@ export default function SimplePage(): React.ReactElement {
         </div>
 
         <div className={styles.heroInner}>
-          <h1 className={styles.headline}>oh-my-codex에서 무엇을 빌드할까요?</h1>
+          <h1 className={styles.headline}>{repositoryName}에서 무엇을 빌드할까요?</h1>
           <ConversationTranscript
             activeTaskId={activeTask?.id || null}
             details={orderedDetails}
@@ -433,11 +663,17 @@ export default function SimplePage(): React.ReactElement {
               </div>
             ) : null}
             <textarea
+              ref={messageInputRef}
               aria-label={isAnsweringPlanner ? "Planner 답변" : "Simple UI 메시지"}
               className={styles.composerInput}
               disabled={isSending}
-              onChange={(event) => setMessage(event.target.value)}
+              onChange={(event) => {
+                setMessage(event.target.value);
+                updateScopeMention(event.target);
+              }}
+              onClick={(event) => updateScopeMention(event.currentTarget)}
               onKeyDown={handleComposerKeyDown}
+              onKeyUp={(event) => updateScopeMention(event.currentTarget)}
               placeholder={
                 isAnsweringPlanner
                   ? "planner 질문에 답변하기"
@@ -446,6 +682,49 @@ export default function SimplePage(): React.ReactElement {
               rows={3}
               value={message}
             />
+            {scopeMention ? (
+              <div className={styles.pathSuggestions} role="listbox" aria-label="채팅 경로 추천">
+                <div className={styles.suggestionHint}>
+                  {isLoadingSuggestions
+                    ? "대상 프로젝트 검색 중..."
+                    : pathSuggestions.length > 0
+                      ? "Enter/Tab으로 선택 경로 삽입"
+                      : "일치하는 파일 또는 폴더가 없습니다"}
+                </div>
+                {pathSuggestions.map((suggestion, index) => (
+                  <Fragment key={`${suggestion.type}:${suggestion.path}`}>
+                    {suggestion.match === "contains" && pathSuggestions[index - 1]?.match === "exact" ? (
+                      <div className={styles.suggestionDivider}>포함 일치</div>
+                    ) : null}
+                    <button
+                      aria-selected={index === selectedSuggestionIndex}
+                      className={classNames(styles.suggestionItem, index === selectedSuggestionIndex && styles.suggestionItemActive)}
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                        insertScopeSuggestion(suggestion);
+                      }}
+                      role="option"
+                      type="button"
+                    >
+                      <span className={styles.suggestionType}>{suggestion.type === "directory" ? "DIR" : "FILE"}</span>
+                      <span className={styles.suggestionPath} title={suggestion.path}>
+                        {tailPath(suggestion.path)}
+                      </span>
+                    </button>
+                  </Fragment>
+                ))}
+              </div>
+            ) : null}
+            <div className={styles.tagRow}>
+              <span>#</span>
+              <input
+                aria-label="task tags"
+                disabled={Boolean(activeTask) || isAnsweringPlanner || isSending}
+                onChange={(event) => setTagInput(event.target.value)}
+                placeholder="#태그 입력, 공백 또는 쉼표로 여러 개"
+                value={tagInput}
+              />
+            </div>
             {pendingImages.length > 0 ? (
               <div className={styles.attachmentTray}>
                 {pendingImages.map((file, index) => (
@@ -487,19 +766,17 @@ export default function SimplePage(): React.ReactElement {
               <ToolbarSelect
                 icon={<FolderOpen size={15} aria-hidden="true" />}
                 label="workspace"
+                onBrowse={openFolderBrowser}
                 value={settings.targetProjectPath}
-                onChange={(value) => updateSettings({ targetProjectPath: value })}
+                onChange={(value) => updateSettings({ targetProjectPath: value, baseBranch: "" })}
               />
-              <span className={styles.toolPill}>
-                <Laptop size={15} aria-hidden="true" />
-                로컬에서 작업
-                <ChevronDown size={14} aria-hidden="true" />
-              </span>
-              <span className={styles.toolPill} title={branchLabel}>
-                <GitBranch size={15} aria-hidden="true" />
-                {branchLabel}
-                <ChevronDown size={14} aria-hidden="true" />
-              </span>
+              <BranchSelect
+                branches={localBranches}
+                error={branchError}
+                isLoading={isLoadingBranches}
+                onChange={(baseBranch) => updateSettings({ baseBranch })}
+                value={selectedBranch}
+              />
               <button
                 className={styles.segment}
                 onClick={() => updateSettings({ planningMode: settings.planningMode === "direct" ? "plan" : "direct" })}
@@ -518,13 +795,6 @@ export default function SimplePage(): React.ReactElement {
                 <Gauge size={14} aria-hidden="true" />
                 {settings.verificationMode === "fast" ? "Fast" : "Balanced"}
               </button>
-              <input
-                aria-label="검증 명령"
-                className={styles.verifyInput}
-                onChange={(event) => updateSettings({ verificationCommand: event.target.value })}
-                placeholder="verification command"
-                value={settings.verificationCommand}
-              />
               <button
                 aria-pressed={settings.approvalGrant}
                 className={classNames(styles.segment, settings.approvalGrant && styles.segmentActive)}
@@ -535,15 +805,72 @@ export default function SimplePage(): React.ReactElement {
                 <ShieldCheck size={14} aria-hidden="true" />
                 권한
               </button>
-              <button className={styles.micButton} disabled type="button" title="음성 입력 준비 중">
-                <Mic size={17} aria-hidden="true" />
-              </button>
               <button className={styles.sendButton} disabled={!canSend} type="submit" title="전송">
                 {isSending ? <LoaderCircle className={styles.spin} size={19} aria-hidden="true" /> : <ArrowUp size={19} aria-hidden="true" />}
               </button>
             </div>
             {error ? <div className={styles.errorLine}>{error}</div> : null}
           </form>
+          {isFolderBrowserOpen ? (
+            <div className={styles.folderBackdrop} role="presentation" onMouseDown={() => setFolderBrowserOpen(false)}>
+              <section
+                aria-modal="true"
+                className={styles.folderModal}
+                role="dialog"
+                onMouseDown={(event) => event.stopPropagation()}
+              >
+                <div className={styles.folderHeader}>
+                  <strong>Workspace 선택</strong>
+                  <button onClick={() => setFolderBrowserOpen(false)} type="button">
+                    닫기
+                  </button>
+                </div>
+                <div className={styles.folderActions}>
+                  <button
+                    disabled={!folderBrowser?.parentPath || isLoadingFolders}
+                    onClick={() => folderBrowser?.parentPath && void loadFolderBrowser(folderBrowser.parentPath)}
+                    type="button"
+                  >
+                    상위
+                  </button>
+                  <button
+                    disabled={!folderBrowser?.currentPath}
+                    onClick={() => folderBrowser?.currentPath && selectWorkspaceFolder(folderBrowser.currentPath)}
+                    type="button"
+                  >
+                    이 폴더 선택
+                  </button>
+                </div>
+                <div className={styles.folderCurrentPath} title={folderBrowser?.currentPath || ""}>
+                  {folderBrowser?.currentPath || "Loading..."}
+                </div>
+                {folderBrowser?.roots.length ? (
+                  <div className={styles.folderRoots}>
+                    {folderBrowser.roots.map((root) => (
+                      <button key={root} onClick={() => void loadFolderBrowser(root)} title={root} type="button">
+                        {root}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                {folderBrowserError ? <div className={styles.folderError}>{folderBrowserError}</div> : null}
+                <div className={styles.folderList}>
+                  {isLoadingFolders ? <div className={styles.folderEmpty}>폴더를 불러오는 중...</div> : null}
+                  {!isLoadingFolders && folderBrowser?.entries.length === 0 ? (
+                    <div className={styles.folderEmpty}>하위 폴더가 없습니다.</div>
+                  ) : null}
+                  {!isLoadingFolders
+                    ? folderBrowser?.entries.map((entry) => (
+                        <button key={entry.path} onClick={() => void loadFolderBrowser(entry.path)} title={entry.path} type="button">
+                          <FolderOpen size={15} aria-hidden="true" />
+                          <span>{entry.name}</span>
+                        </button>
+                      ))
+                    : null}
+                </div>
+              </section>
+            </div>
+          ) : null}
           <RecentTasks tasks={tasks} activeTaskId={activeTask?.id || null} onOpen={(taskId) => setConversationIds([taskId])} />
         </div>
       </section>
@@ -554,14 +881,48 @@ export default function SimplePage(): React.ReactElement {
 function ToolbarSelect(props: {
   icon: React.ReactNode;
   label: string;
+  onBrowse: () => void;
   value: string;
   onChange: (value: string) => void;
 }): React.ReactElement {
   return (
-    <label className={styles.workspaceField}>
-      {props.icon}
+    <div className={styles.workspaceField}>
+      <button aria-label="Workspace 폴더 찾아보기" onClick={props.onBrowse} title="Workspace 폴더 찾아보기" type="button">
+        {props.icon}
+      </button>
       <span>{props.label}</span>
       <input value={props.value} onChange={(event) => props.onChange(event.target.value)} />
+    </div>
+  );
+}
+
+function BranchSelect(props: {
+  branches: LocalBranch[];
+  error: string | null;
+  isLoading: boolean;
+  value: string;
+  onChange: (value: string) => void;
+}): React.ReactElement {
+  const title = props.error || (props.isLoading ? "Loading local branches" : props.value || "No branch selected");
+  return (
+    <label className={styles.branchField} title={title}>
+      <GitBranch size={15} aria-hidden="true" />
+      <select
+        aria-label="base branch"
+        disabled={props.isLoading || props.branches.length === 0}
+        onChange={(event) => props.onChange(event.target.value)}
+        value={props.value}
+      >
+        {props.branches.length === 0 ? (
+          <option value="">{props.isLoading ? "Loading branches" : "No local branches"}</option>
+        ) : (
+          props.branches.map((branch) => (
+            <option key={branch.name} value={branch.name}>
+              {branch.isCurrent ? `${branch.name} *` : branch.name}
+            </option>
+          ))
+        )}
+      </select>
     </label>
   );
 }

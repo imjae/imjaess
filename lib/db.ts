@@ -78,6 +78,7 @@ function migrate(database: DatabaseType): void {
       goal TEXT NOT NULL,
       scope TEXT NOT NULL,
       target_project_path TEXT NOT NULL,
+      base_branch TEXT,
       worktree_path TEXT,
       agent_plan TEXT NOT NULL,
       planning_mode TEXT NOT NULL DEFAULT 'direct',
@@ -294,6 +295,9 @@ function migrate(database: DatabaseType): void {
   if (!taskColumnNames.has("planning_mode")) {
     database.exec("ALTER TABLE tasks ADD COLUMN planning_mode TEXT NOT NULL DEFAULT 'direct';");
   }
+  if (!taskColumnNames.has("base_branch")) {
+    database.exec("ALTER TABLE tasks ADD COLUMN base_branch TEXT;");
+  }
   database.exec(`
     INSERT OR IGNORE INTO task_groups (name, created_at, updated_at)
     SELECT DISTINCT TRIM(task_group), created_at, updated_at
@@ -358,6 +362,7 @@ function mapTask(row: Record<string, unknown>): Task {
     goal: String(row.goal),
     scope: String(row.scope),
     targetProjectPath: String(row.target_project_path),
+    baseBranch: row.base_branch ? String(row.base_branch) : null,
     worktreePath: row.worktree_path ? String(row.worktree_path) : null,
     agentPlan: String(row.agent_plan),
     planningMode: normalizePlanningMode(row.planning_mode),
@@ -678,6 +683,7 @@ export function createTask(input: {
   goal: string;
   scope: string;
   targetProjectPath: string;
+  baseBranch?: string | null;
   agentPlan: string;
   planningMode?: TaskPlanningMode;
   verificationMode?: TaskVerificationMode;
@@ -694,6 +700,7 @@ export function createTask(input: {
     goal: input.goal,
     scope: input.scope,
     targetProjectPath: input.targetProjectPath,
+    baseBranch: input.baseBranch?.trim() || null,
     worktreePath: null,
     agentPlan: input.agentPlan,
     planningMode: input.planningMode || "direct",
@@ -710,8 +717,8 @@ export function createTask(input: {
     database
       .prepare(
         `INSERT INTO tasks
-        (id, parent_task_id, task_group, title, goal, scope, target_project_path, worktree_path, agent_plan, planning_mode, verification_mode, approval_grant, status, current_round, failure_reason, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        (id, parent_task_id, task_group, title, goal, scope, target_project_path, base_branch, worktree_path, agent_plan, planning_mode, verification_mode, approval_grant, status, current_round, failure_reason, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         task.id,
@@ -721,6 +728,7 @@ export function createTask(input: {
         task.goal,
         task.scope,
         task.targetProjectPath,
+        task.baseBranch,
         task.worktreePath,
         task.agentPlan,
         task.planningMode,
@@ -751,6 +759,7 @@ export function upsertImportedTask(input: {
   goal: string;
   scope: string;
   targetProjectPath: string;
+  baseBranch?: string | null;
   worktreePath?: string | null;
   agentPlan: string;
   planningMode?: TaskPlanningMode;
@@ -778,6 +787,7 @@ export function upsertImportedTask(input: {
     goal: input.goal,
     scope: input.scope,
     targetProjectPath: input.targetProjectPath,
+    baseBranch: input.baseBranch?.trim() || existing?.baseBranch || null,
     worktreePath: input.worktreePath || null,
     agentPlan: input.agentPlan,
     planningMode: input.planningMode || existing?.planningMode || "direct",
@@ -794,8 +804,8 @@ export function upsertImportedTask(input: {
     database
       .prepare(
         `INSERT INTO tasks
-        (id, parent_task_id, task_group, title, goal, scope, target_project_path, worktree_path, agent_plan, planning_mode, verification_mode, approval_grant, status, current_round, failure_reason, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, parent_task_id, task_group, title, goal, scope, target_project_path, base_branch, worktree_path, agent_plan, planning_mode, verification_mode, approval_grant, status, current_round, failure_reason, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           parent_task_id = excluded.parent_task_id,
           task_group = excluded.task_group,
@@ -803,6 +813,7 @@ export function upsertImportedTask(input: {
           goal = excluded.goal,
           scope = excluded.scope,
           target_project_path = excluded.target_project_path,
+          base_branch = excluded.base_branch,
           worktree_path = excluded.worktree_path,
           agent_plan = excluded.agent_plan,
           planning_mode = excluded.planning_mode,
@@ -821,6 +832,7 @@ export function upsertImportedTask(input: {
         task.goal,
         task.scope,
         task.targetProjectPath,
+        task.baseBranch,
         task.worktreePath,
         task.agentPlan,
         task.planningMode,

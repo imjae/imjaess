@@ -15,6 +15,7 @@ import {
   ImageIcon,
   NotebookTabs,
   ListChecks,
+  MessageSquareText,
   Play,
   Plus,
   RefreshCw,
@@ -39,6 +40,7 @@ import type {
   Verification
 } from "@/lib/types";
 import type { ModelOption } from "@/lib/model-catalog";
+import { repositoryName } from "@/lib/repository-name";
 
 type Tab = "agents" | "artifacts" | "shell" | "verifications" | "conventions";
 type UiLanguage = "ko" | "en";
@@ -1622,7 +1624,7 @@ export default function HomePage(): React.ReactElement {
             <Gauge size={20} aria-hidden="true" />
           </div>
           <div>
-            <h1>Local Multi-Agent Harness</h1>
+            <h1>{repositoryName}</h1>
             <p>
               {language === "ko"
                 ? "API agent, 검증 루프, worktree 격리, Unity 컨벤션 메모리"
@@ -1653,6 +1655,10 @@ export default function HomePage(): React.ReactElement {
             <Settings size={16} aria-hidden="true" />
             {tr(language, "settings")}
           </button>
+          <a className="btn topbar-link" href="/simple" title="Simple UI">
+            <MessageSquareText size={16} aria-hidden="true" />
+            Simple UI
+          </a>
           <button className="btn" onClick={() => void refreshTasks()} title={tr(language, "refreshTasks")}>
             <RefreshCw size={16} aria-hidden="true" />
           </button>

@@ -891,6 +891,10 @@ button {
   opacity: 0.55;
 }
 
+.topbar-link {
+  text-decoration: none;
+}
+
 .task-tag-picker {
   display: flex;
   flex-wrap: wrap;

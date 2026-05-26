@@ -77,6 +77,7 @@ export interface Task {
   goal: string;
   scope: string;
   targetProjectPath: string;
+  baseBranch?: string | null;
   worktreePath: string | null;
   agentPlan: string;
   planningMode: TaskPlanningMode;
@@ -196,6 +197,7 @@ export interface CreateTaskInput {
   goal: string;
   scope?: string;
   targetProjectPath: string;
+  baseBranch?: string | null;
   agentPlan?: string;
   planningMode?: TaskPlanningMode;
   verificationMode?: TaskVerificationMode;

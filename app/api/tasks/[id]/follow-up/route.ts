@@ -7,6 +7,7 @@ export const dynamic = "force-dynamic";
 const followUpSchema = z.object({
   message: z.string().min(1),
   approvalGrant: z.boolean().optional().default(true),
+  baseBranch: z.string().optional().default(""),
   verificationCommand: z.string().optional().default("")
 });
 
@@ -18,6 +19,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       parentTaskId: id,
       message: body.message,
       approvalGrant: body.approvalGrant,
+      baseBranch: body.baseBranch,
       verificationCommand: body.verificationCommand
     });
     return NextResponse.json({ task }, { status: 201 });

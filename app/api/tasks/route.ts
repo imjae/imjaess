@@ -14,6 +14,7 @@ const createTaskSchema = z.object({
   goal: z.string().min(1),
   scope: z.string().optional().default(""),
   targetProjectPath: z.string().min(1),
+  baseBranch: z.string().optional().default(""),
   agentPlan: z.string().optional().default(""),
   planningMode: z.enum(["direct", "plan"]).optional().default("direct"),
   verificationMode: z.enum(["fast", "balanced"]).optional().default("fast"),
@@ -44,6 +45,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     goal: body.goal,
     scope: body.scope,
     targetProjectPath,
+    baseBranch: body.baseBranch,
     agentPlan:
       body.agentPlan ||
       "Researcher collects evidence, optional Planner asks clarifying questions, Implementer changes code, Verifier decides pass/needs_fix/blocked.",

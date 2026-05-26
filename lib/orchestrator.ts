@@ -49,6 +49,7 @@ function taskBrief(task: Task, round: number, brokerBrief: string, scopeReferenc
     `Scope: ${task.scope}`,
     scopeReferenceContext,
     `Target project: ${task.targetProjectPath}`,
+    task.baseBranch ? `Base branch: ${task.baseBranch}` : "",
     `Agent plan:\n${task.agentPlan || defaultAgentPlan()}`,
     `Round: ${round}`,
     brokerBrief ? `Prior broker brief:\n${brokerBrief}` : ""
@@ -170,7 +171,7 @@ export async function processTask(taskId: string): Promise<void> {
       });
     }
     let brokerBrief = "";
-    let implementationBaseRef = "HEAD";
+    let implementationBaseRef = task.baseBranch || "HEAD";
     const rounds = maxAgentRounds();
 
     for (let round = 1; round <= rounds; round += 1) {

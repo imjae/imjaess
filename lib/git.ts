@@ -49,6 +49,37 @@ export async function isGitRepository(projectPath: string): Promise<boolean> {
   }
 }
 
+export interface LocalBranch {
+  name: string;
+  isCurrent: boolean;
+}
+
+export async function listLocalBranches(projectPath: string): Promise<{
+  root: string;
+  branches: LocalBranch[];
+}> {
+  const resolvedPath = path.resolve(projectPath);
+  if (!(await isGitRepository(resolvedPath))) {
+    throw new Error("Target path is not a git repository.");
+  }
+  const root = await gitRoot(resolvedPath);
+  const output = await git(["branch", "--format=%(refname:short)%09%(HEAD)"], root);
+  const branches = output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [name, headMarker = ""] = line.split("\t");
+      return {
+        name,
+        isCurrent: headMarker.trim() === "*"
+      };
+    })
+    .filter((branch) => branch.name.length > 0)
+    .sort((a, b) => Number(b.isCurrent) - Number(a.isCurrent) || a.name.localeCompare(b.name));
+  return { root, branches };
+}
+
 export function integrationBranchName(): string {
   return process.env.HARNESS_INTEGRATION_BRANCH || "imjae";
 }
