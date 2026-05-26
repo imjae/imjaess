@@ -11,6 +11,7 @@ import {
   Clock3,
   FolderOpen,
   Gauge,
+  GripHorizontal,
   GitBranch,
   ImageIcon,
   Link2,
@@ -40,6 +41,10 @@ import styles from "./simple.module.css";
 const defaultProjectPath = "D:\\dev\\Deluge";
 const conversationStorageKey = "oh-my-codex-simple-conversation";
 const settingsStorageKey = "oh-my-codex-simple-settings";
+const transcriptHeightStorageKey = "oh-my-codex-simple-transcript-height";
+const defaultTranscriptHeight = 520;
+const minTranscriptHeight = 260;
+const maxTranscriptHeight = 900;
 
 type SimpleSettings = {
   targetProjectPath: string;
@@ -287,6 +292,18 @@ function loadStoredSettings(): SimpleSettings {
   }
 }
 
+function clampTranscriptHeight(value: number): number {
+  return Math.max(minTranscriptHeight, Math.min(maxTranscriptHeight, Math.round(value)));
+}
+
+function loadStoredTranscriptHeight(): number {
+  if (typeof window === "undefined") {
+    return defaultTranscriptHeight;
+  }
+  const parsed = Number.parseInt(window.localStorage.getItem(transcriptHeightStorageKey) || "", 10);
+  return Number.isFinite(parsed) ? clampTranscriptHeight(parsed) : defaultTranscriptHeight;
+}
+
 export default function SimplePage(): React.ReactElement {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const messageInputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -311,6 +328,7 @@ export default function SimplePage(): React.ReactElement {
   const [isSending, setIsSending] = useState(false);
   const [isHydrated, setIsHydrated] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [transcriptHeight, setTranscriptHeight] = useState(defaultTranscriptHeight);
 
   const activeTask = taskDetails[taskDetails.length - 1] || null;
   const plannerQuestions = latestArtifact(activeTask, "plan_questions");
@@ -328,6 +346,7 @@ export default function SimplePage(): React.ReactElement {
   useEffect(() => {
     setConversationIds(loadStoredConversation());
     setSettings(loadStoredSettings());
+    setTranscriptHeight(loadStoredTranscriptHeight());
     setIsHydrated(true);
   }, []);
 
@@ -344,6 +363,13 @@ export default function SimplePage(): React.ReactElement {
     }
     window.localStorage.setItem(settingsStorageKey, JSON.stringify(settings));
   }, [settings, isHydrated]);
+
+  useEffect(() => {
+    if (!isHydrated) {
+      return;
+    }
+    window.localStorage.setItem(transcriptHeightStorageKey, String(transcriptHeight));
+  }, [transcriptHeight, isHydrated]);
 
   async function refreshConversation(ids = conversationIds): Promise<void> {
     const tasksData = await jsonFetch<TasksResponse>("/api/tasks");
@@ -650,6 +676,32 @@ export default function SimplePage(): React.ReactElement {
     setError(null);
   }
 
+  function startTranscriptResize(event: React.PointerEvent<HTMLButtonElement>): void {
+    event.preventDefault();
+    const startY = event.clientY;
+    const startHeight = transcriptHeight;
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+
+    document.body.style.cursor = "ns-resize";
+    document.body.style.userSelect = "none";
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      setTranscriptHeight(clampTranscriptHeight(startHeight + moveEvent.clientY - startY));
+    };
+    const handlePointerUp = () => {
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerUp);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp, { once: true });
+    window.addEventListener("pointercancel", handlePointerUp, { once: true });
+  }
+
   return (
     <main className={styles.simpleShell}>
       <section className={classNames(styles.heroStage, orderedDetails.length > 0 && styles.hasConversation)}>
@@ -669,8 +721,10 @@ export default function SimplePage(): React.ReactElement {
           <ConversationTranscript
             activeTaskId={activeTask?.id || null}
             details={orderedDetails}
+            onResizeStart={startTranscriptResize}
             onCancelTask={cancelTask}
             plannerQuestions={plannerQuestions}
+            transcriptHeight={transcriptHeight}
           />
           <form className={styles.composer} onSubmit={(event) => void submitMessage(event)}>
             {isAnsweringPlanner ? (
@@ -948,24 +1002,40 @@ function ConversationTranscript(props: {
   activeTaskId: string | null;
   details: TaskDetail[];
   onCancelTask: (taskId: string) => Promise<void>;
+  onResizeStart: (event: React.PointerEvent<HTMLButtonElement>) => void;
   plannerQuestions: BrokerArtifact | null;
+  transcriptHeight: number;
 }): React.ReactElement | null {
   if (props.details.length === 0) {
     return null;
   }
 
   return (
-    <section className={styles.transcript} aria-label="Simple UI conversation transcript">
-      {props.details.map((task, index) => (
-        <TaskConversationItem
-          isActive={task.id === props.activeTaskId}
-          isRoot={index === 0}
-          key={task.id}
-          onCancelTask={props.onCancelTask}
-          plannerQuestions={task.id === props.activeTaskId ? props.plannerQuestions : latestArtifact(task, "plan_questions")}
-          task={task}
-        />
-      ))}
+    <section
+      className={styles.transcriptFrame}
+      style={{ "--transcript-height": `${props.transcriptHeight}px` } as React.CSSProperties}
+    >
+      <div className={styles.transcript} aria-label="Simple UI conversation transcript">
+        {props.details.map((task, index) => (
+          <TaskConversationItem
+            isActive={task.id === props.activeTaskId}
+            isRoot={index === 0}
+            key={task.id}
+            onCancelTask={props.onCancelTask}
+            plannerQuestions={task.id === props.activeTaskId ? props.plannerQuestions : latestArtifact(task, "plan_questions")}
+            task={task}
+          />
+        ))}
+      </div>
+      <button
+        aria-label="Resize conversation height"
+        className={styles.resizeHandle}
+        onPointerDown={props.onResizeStart}
+        title="Resize conversation height"
+        type="button"
+      >
+        <GripHorizontal size={18} aria-hidden="true" />
+      </button>
     </section>
   );
 }

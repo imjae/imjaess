@@ -13,6 +13,19 @@ const globalForWorker = globalThis as typeof globalThis & {
   __harnessQueue?: QueueState;
 };
 
+function normalizeRunningState(value: unknown): Map<string, AbortController> {
+  if (value instanceof Map) {
+    return value as Map<string, AbortController>;
+  }
+  if (value instanceof Set) {
+    return new Map([...value].map((taskId) => [String(taskId), new AbortController()]));
+  }
+  if (Array.isArray(value)) {
+    return new Map(value.map((taskId) => [String(taskId), new AbortController()]));
+  }
+  return new Map<string, AbortController>();
+}
+
 function state(): QueueState {
   if (!globalForWorker.__harnessQueue) {
     globalForWorker.__harnessQueue = {
@@ -22,6 +35,7 @@ function state(): QueueState {
       lastCleanupAt: 0
     };
   }
+  globalForWorker.__harnessQueue.running = normalizeRunningState(globalForWorker.__harnessQueue.running);
   return globalForWorker.__harnessQueue;
 }
 
