@@ -107,6 +107,7 @@ const UI_TEXT = {
     notionDatabase: "Task database",
     onlyImages: "Only image files can be attached.",
     originalOutput: "Original output",
+    openDetail: "Open Detail",
     parallelTasks: "Parallel Tasks",
     pendingImages: "Images to attach when this task starts",
     plannerAnswer: "Your answer",
@@ -115,6 +116,7 @@ const UI_TEXT = {
     planningMode: "Planning mode",
     planMode: "Plan",
     previewExport: "Preview Export",
+    rawDetails: "Raw details",
     reason: "Reason",
     reasoningEffort: "Reasoning",
     refreshTasks: "Refresh tasks",
@@ -129,6 +131,7 @@ const UI_TEXT = {
     scopeSuggestions: "Scope path suggestions",
     searchingTarget: "Searching target project...",
     selectTaskEmpty: "Select a task to inspect agent output and verifier decisions.",
+    selectedTaskSummary: "Selected Task",
     selectTargetFolder: "Select Target Folder",
     selectThisFolder: "Select This Folder",
     settings: "Settings",
@@ -136,6 +139,7 @@ const UI_TEXT = {
     shellTab: "Shell",
     submitPlannerAnswer: "Submit and Resume",
     syncNotionTasks: "Push Task DB",
+    taskTimeline: "Task timeline",
     taskDetail: "Task Detail",
     taskGroup: "Task Tag",
     taskGroups: "Task tags",
@@ -376,6 +380,213 @@ function latestBrokerArtifact(task: TaskDetail | null, kind: BrokerArtifact["kin
   return task.brokerArtifacts.filter((artifact) => artifact.kind === kind).at(-1) || null;
 }
 
+type TaskTimelineEvent = {
+  id: string;
+  time: string;
+  title: string;
+  meta: string;
+  body: string;
+  rawLabel: string;
+  raw?: string;
+  hideRaw?: boolean;
+  tone?: "success" | "warning" | "danger";
+};
+
+function eventTimeValue(value: string): number {
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function firstUsefulLine(text: string, fallback: string): string {
+  const line = text
+    .split(/\r?\n/)
+    .map((item) => item.trim())
+    .find(Boolean);
+  return shortText(line || fallback, 220);
+}
+
+function stripRawLogSections(text: string): string {
+  return text
+    .replace(/\n\s*(STDOUT|STDERR)\b[\s\S]*$/i, "")
+    .replace(/\n\s*PS [^\n]+> [^\n]+[\s\S]*$/i, "")
+    .trim();
+}
+
+function extractReadableFailureText(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return "";
+  }
+  try {
+    const parsed = JSON.parse(trimmed) as {
+      error?: string;
+      message?: string;
+      summary?: string;
+      reason?: string;
+      decision?: string;
+    };
+    return String(parsed.reason || parsed.summary || parsed.error || parsed.message || parsed.decision || trimmed);
+  } catch {
+    return trimmed;
+  }
+}
+
+function friendlyFailureReason(text: string | null | undefined, language: UiLanguage): string {
+  const value = stripRawLogSections(extractReadableFailureText(text || ""));
+  if (!value) {
+    return language === "ko" ? "아직 실패 원인이 기록되지 않았습니다." : "No failure cause has been recorded yet.";
+  }
+
+  const codeMatch = value.match(/exited with code\s+(-?\d+)/i) || value.match(/exit\s+(-?\d+)/i);
+  if (/Agent slice exceeded .*time budget/i.test(value) || /timed out|time budget/i.test(value)) {
+    return language === "ko"
+      ? "Agent 실행 시간이 설정된 제한을 넘어서 중단됐습니다. 작업이 너무 크거나 모델 응답이 오래 걸린 상태라, 범위를 줄이거나 시간 제한을 늘린 뒤 다시 실행하는 것이 좋습니다."
+      : "The agent exceeded its time budget. The task is likely too large or the model response took too long; narrow the scope or increase the time limit before retrying.";
+  }
+  if (/exceeded your current quota|insufficient_quota|quota exceeded|billing details|usage limits/i.test(value)) {
+    return language === "ko"
+      ? "선택한 모델/provider에서 API 사용량 또는 결제 한도에 걸려 중단됐습니다. Platform 크레딧, billing, role별 모델 설정을 확인해야 합니다."
+      : "The selected model/provider hit an API quota or billing limit. Check Platform credits, billing, and the model setting for this role.";
+  }
+  if (/OPENAI_API_KEY is required|missing api key|api key/i.test(value)) {
+    return language === "ko"
+      ? "OpenAI API 키가 설정되지 않아 agent를 실행할 수 없습니다. `.env.local`의 API 키 설정을 확인해야 합니다."
+      : "The agent cannot run because the OpenAI API key is missing. Check the API key in `.env.local`.";
+  }
+  if (/Codex CLI was not found|command not found|ENOENT/i.test(value)) {
+    return language === "ko"
+      ? "Codex CLI 실행 파일을 찾지 못해 중단됐습니다. CLI 설치 상태와 PATH 설정을 확인해야 합니다."
+      : "The Codex CLI executable was not found. Check the CLI installation and PATH.";
+  }
+  if (/Codex CLI exited with code/i.test(value) || codeMatch) {
+    const codeText = codeMatch ? ` (${language === "ko" ? "종료 코드" : "exit code"} ${codeMatch[1]})` : "";
+    return language === "ko"
+      ? `Codex CLI가 정상 완료되지 않아 중단됐습니다${codeText}. 원인은 대개 명령 실패, 권한 문제, 또는 CLI 내부 오류입니다.`
+      : `The Codex CLI did not complete successfully${codeText}. This usually means the command failed, permissions were insufficient, or the CLI hit an internal error.`;
+  }
+  if (/does not have a CLI approval grant|approval grant|not approved/i.test(value)) {
+    return language === "ko"
+      ? "이 Task에 CLI 실행 승인이 없어 작업이 멈췄습니다. Task 단위 실행 권한을 승인한 뒤 다시 시작해야 합니다."
+      : "This task stopped because it does not have CLI execution approval. Grant task-level approval and run it again.";
+  }
+  if (/maximum tool-call loop|too many tool/i.test(value)) {
+    return language === "ko"
+      ? "Agent가 도구 호출을 너무 많이 반복해서 중단됐습니다. 목표나 Scope를 더 좁히면 다음 실행에서 안정적으로 끝날 가능성이 높습니다."
+      : "The agent repeated too many tool calls and was stopped. Narrowing the goal or scope should make the next run more stable.";
+  }
+  if (/blocked/i.test(value)) {
+    return language === "ko"
+      ? `Verifier가 통과시키기 어렵다고 판단해 Task를 차단했습니다. 핵심 이유: ${shortText(localizedAgentOutput(value, language), 220)}`
+      : `The verifier blocked this task. Main reason: ${shortText(value, 220)}`;
+  }
+  if (/failed|error|exception/i.test(value)) {
+    return language === "ko"
+      ? `실행 중 오류가 발생했습니다. 핵심 이유: ${shortText(localizedAgentOutput(value, language), 220)}`
+      : `The run failed. Main reason: ${shortText(value, 220)}`;
+  }
+  return shortText(localizedAgentOutput(value, language), 260);
+}
+
+function friendlyShellFailure(log: ShellLog, language: UiLanguage): string {
+  const command = shortText(log.command, 110);
+  const output = stripRawLogSections(extractReadableFailureText(`${log.stderr || log.stdout || ""}`));
+  const suffix = output ? ` ${language === "ko" ? "핵심 이유:" : "Main reason:"} ${shortText(localizedAgentOutput(output, language), 180)}` : "";
+  return language === "ko"
+    ? `검증 명령이 실패했습니다. 명령: ${command}. 종료 코드: ${log.exitCode ?? "signal"}.${suffix}`
+    : `The verification command failed. Command: ${command}. Exit code: ${log.exitCode ?? "signal"}.${suffix}`;
+}
+
+function roleTimelineTitle(role: AgentRun["role"], language: UiLanguage): string {
+  const labels: Record<AgentRun["role"], Record<UiLanguage, string>> = {
+    researcher: { ko: "관련 파일과 제약을 조사했어요.", en: "Researcher gathered files and constraints." },
+    planner: { ko: "구현 전에 확인할 질문을 만들었어요.", en: "Planner prepared questions before implementation." },
+    implementer: { ko: "격리된 worktree에서 구현을 시도했어요.", en: "Implementer worked in an isolated worktree." },
+    tester: { ko: "독립 검증을 수행했어요.", en: "Tester checked the implementation independently." },
+    verifier: { ko: "최종 판정을 내렸어요.", en: "Verifier made the final decision." }
+  };
+  return labels[role][language];
+}
+
+function artifactTimelineTitle(kind: BrokerArtifact["kind"], language: UiLanguage): string {
+  const labels: Partial<Record<BrokerArtifact["kind"], Record<UiLanguage, string>>> = {
+    evidence_pack: { ko: "조사 결과가 정리됐어요.", en: "Research evidence was packaged." },
+    plan_questions: { ko: "Planner 질문이 준비됐어요.", en: "Planner questions are ready." },
+    plan_answer: { ko: "사용자 답변이 저장됐어요.", en: "Your planner answer was saved." },
+    plan_brief: { ko: "구현 계획이 정리됐어요.", en: "The implementation plan was packaged." },
+    implementation_brief: { ko: "구현 결과 요약이 만들어졌어요.", en: "Implementation evidence was summarized." },
+    test_result: { ko: "테스트 결과가 정리됐어요.", en: "Test result was packaged." },
+    final_brief: { ko: "최종 결과가 정리됐어요.", en: "Final result was summarized." }
+  };
+  return labels[kind]?.[language] || (language === "ko" ? "브로커 산출물이 기록됐어요." : "Broker artifact recorded.");
+}
+
+function buildTaskTimeline(task: TaskDetail, language: UiLanguage): TaskTimelineEvent[] {
+  const events: TaskTimelineEvent[] = [];
+  for (const run of task.agentRuns) {
+    const failedRun = run.status === "failed" || Boolean(run.error) || run.timedOut;
+    const rawRunText = run.error || run.output || "";
+    const display = failedRun ? friendlyFailureReason(rawRunText, language) : localizedAgentOutput(rawRunText, language);
+    events.push({
+      id: `agent:${run.id}`,
+      time: run.startedAt,
+      title: failedRun ? (language === "ko" ? "Agent 실행이 중단된 이유를 정리했어요." : "Agent failure cause was summarized.") : roleTimelineTitle(run.role, language),
+      meta: `${run.role} / ${run.status} / ${tr(language, "round")} ${run.round}`,
+      body: firstUsefulLine(display, run.status === "running" ? (language === "ko" ? "실행 중..." : "Running...") : run.status),
+      rawLabel: language === "ko" ? "원문 agent 로그" : "Raw agent log",
+      raw: failedRun ? undefined : run.error || run.output || run.input,
+      hideRaw: failedRun,
+      tone: run.status === "failed" || run.timedOut ? "danger" : run.status === "running" ? "warning" : undefined
+    });
+  }
+  for (const artifact of task.brokerArtifacts) {
+    const failureArtifact = artifact.kind === "final_brief" && /blocked|failed|error|exception|time budget|quota/i.test(artifact.content);
+    events.push({
+      id: `artifact:${artifact.id}`,
+      time: artifact.createdAt,
+      title: artifactTimelineTitle(artifact.kind, language),
+      meta: `${artifact.kind} / ${artifact.sourceRole} / ${tr(language, "round")} ${artifact.round}`,
+      body: firstUsefulLine(failureArtifact ? friendlyFailureReason(artifact.content, language) : localizedAgentOutput(artifact.content, language), artifact.kind),
+      rawLabel: language === "ko" ? "원문 broker artifact" : "Raw broker artifact",
+      raw: failureArtifact ? undefined : artifact.content,
+      hideRaw: failureArtifact,
+      tone: failureArtifact ? "danger" : artifact.kind === "plan_questions" ? "warning" : undefined
+    });
+  }
+  for (const log of task.shellLogs) {
+    const shellFailed = log.exitCode !== null && log.exitCode !== 0;
+    events.push({
+      id: `shell:${log.id}`,
+      time: log.createdAt,
+      title: language === "ko" ? "검증 명령을 실행했어요." : "Shell command was executed.",
+      meta: `${log.agentRole} / exit ${log.exitCode ?? "signal"} / ${log.durationMs}ms`,
+      body: shellFailed ? friendlyShellFailure(log, language) : shortText(log.command, 220),
+      rawLabel: language === "ko" ? "원문 shell 로그" : "Raw shell log",
+      raw: shellFailed ? undefined : `PS ${log.cwd}> ${log.command}\n\nSTDOUT\n${log.stdout}\n\nSTDERR\n${log.stderr}`,
+      hideRaw: shellFailed,
+      tone: shellFailed ? "danger" : undefined
+    });
+  }
+  for (const verification of task.verifications) {
+    const verifierBlocked = verification.decision === "blocked";
+    const verifierNeedsFix = verification.decision === "needs_fix";
+    const verifierDisplay = verifierBlocked || verifierNeedsFix
+      ? friendlyFailureReason(verification.summary, language)
+      : localizedAgentOutput(verification.summary, language);
+    events.push({
+      id: `verification:${verification.id}`,
+      time: verification.createdAt,
+      title: language === "ko" ? "최종 판정을 내렸어요." : "Verifier decision recorded.",
+      meta: `${tr(language, "round")} ${verification.round} / ${verification.decision}`,
+      body: firstUsefulLine(verifierDisplay, verification.decision),
+      rawLabel: language === "ko" ? "원문 verifier 판정" : "Raw verifier decision",
+      raw: verifierBlocked ? undefined : verification.summary,
+      hideRaw: verifierBlocked,
+      tone: verification.decision === "pass" ? "success" : verification.decision === "blocked" ? "danger" : "warning"
+    });
+  }
+  return events.sort((a, b) => eventTimeValue(a.time) - eventTimeValue(b.time));
+}
+
 function normalizeTaskTags(tags: string[]): string[] {
   const seen = new Set<string>();
   const normalized: string[] = [];
@@ -534,6 +745,7 @@ export default function HomePage(): React.ReactElement {
   const [selectedTaskTags, setSelectedTaskTags] = useState<TaskTagFilter[]>([]);
   const [taskDetail, setTaskDetail] = useState<TaskDetail | null>(null);
   const [tab, setTab] = useState<Tab>("agents");
+  const [isDetailModalOpen, setDetailModalOpen] = useState(false);
   const [notes, setNotes] = useState<ConventionNote[]>([]);
   const [agentSettings, setAgentSettings] = useState<AgentSetting[]>([]);
   const [modelCatalog, setModelCatalog] = useState<ModelCatalog>({ openai: [], "codex-cli": [], mock: [] });
@@ -604,6 +816,19 @@ export default function HomePage(): React.ReactElement {
     window.localStorage.setItem(LANGUAGE_STORAGE_KEY, language);
   }, [language]);
 
+  useEffect(() => {
+    if (!isDetailModalOpen) {
+      return;
+    }
+    function handleKeyDown(event: globalThis.KeyboardEvent): void {
+      if (event.key === "Escape") {
+        setDetailModalOpen(false);
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isDetailModalOpen]);
+
   async function refreshTasks(): Promise<void> {
     const data = await jsonFetch<{ tasks: Task[]; taskTags?: string[]; taskGroups?: string[] }>("/api/tasks");
     setTasks(data.tasks);
@@ -671,6 +896,12 @@ export default function HomePage(): React.ReactElement {
     }, 1500);
     return () => window.clearInterval(interval);
   }, [selectedTaskId]);
+
+  useEffect(() => {
+    if (taskDetail?.status === "waiting_for_user" && latestBrokerArtifact(taskDetail, "plan_questions")) {
+      setDetailModalOpen(true);
+    }
+  }, [taskDetail]);
 
   useEffect(() => {
     void refreshNotes().catch(() => undefined);
@@ -1087,6 +1318,12 @@ export default function HomePage(): React.ReactElement {
     await refreshDetail(selectedTaskId);
   }
 
+  async function openTaskDetail(taskId: string): Promise<void> {
+    setSelectedTaskId(taskId);
+    setDetailModalOpen(true);
+    await refreshDetail(taskId);
+  }
+
   async function submitPlannerAnswer(event: FormEvent): Promise<void> {
     event.preventDefault();
     if (!taskDetail || !plannerAnswer.trim()) {
@@ -1292,11 +1529,11 @@ export default function HomePage(): React.ReactElement {
       <Fragment key={task.id}>
         <div
           className={`task-item ${task.parentTaskId ? "follow-up-task" : ""} ${selectedTaskId === task.id ? "selected" : ""}`}
-          onClick={() => setSelectedTaskId(task.id)}
+          onClick={() => void openTaskDetail(task.id)}
           onKeyDown={(event) => {
             if (event.key === "Enter" || event.key === " ") {
               event.preventDefault();
-              setSelectedTaskId(task.id);
+              void openTaskDetail(task.id);
             }
             if (hasChildren && event.key === "ArrowRight") {
               event.preventDefault();
@@ -1371,7 +1608,6 @@ export default function HomePage(): React.ReactElement {
   }
 
   const plannerQuestions = latestBrokerArtifact(taskDetail, "plan_questions");
-  const showPlannerAnswerModal = taskDetail?.status === "waiting_for_user" && Boolean(plannerQuestions);
 
   return (
     <main className="app-shell">
@@ -1707,27 +1943,11 @@ export default function HomePage(): React.ReactElement {
                 {!taskDetail ? (
                   <div className="empty">{tr(language, "selectTaskEmpty")}</div>
                 ) : (
-                  <TaskDetailView
+                  <TaskSummaryPanel
                     language={language}
                     task={taskDetail}
-                    tab={tab}
-                    setTab={setTab}
-                    notes={notes}
-                    noteForm={noteForm}
-                    setNoteForm={setNoteForm}
-                    submitNote={submitNote}
-                    exportConventions={exportConventions}
-                    exportPreview={exportPreview}
-                    followUpMessage={followUpMessage}
-                    setFollowUpMessage={setFollowUpMessage}
-                    createFollowUp={createFollowUpForSelectedTask}
-                    isCreatingFollowUp={isCreatingFollowUp}
-                    uploadAttachments={uploadTaskImages}
-                    isUploadingAttachment={isUploadingAttachment}
-                    selectTask={setSelectedTaskId}
-                    knownTaskTags={knownTaskTags}
-                    updateTaskTags={updateTaskTags}
-                    deleteTaskTag={deleteGlobalTaskTag}
+                    openDetail={() => setDetailModalOpen(true)}
+                    startTask={startSelectedTask}
                   />
                 )}
               </div>
@@ -1736,31 +1956,53 @@ export default function HomePage(): React.ReactElement {
         </section>
       </section>
 
-      {showPlannerAnswerModal ? (
-        <div className="modal-backdrop" role="presentation">
-          <section aria-modal="true" className="settings-modal planner-modal" role="dialog">
+      {isDetailModalOpen && taskDetail ? (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setDetailModalOpen(false)}>
+          <section
+            aria-modal="true"
+            className="settings-modal task-detail-modal"
+            role="dialog"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
             <div className="modal-header">
               <div className="panel-title">
-                <ShieldQuestion size={18} aria-hidden="true" />
-                {tr(language, "plannerQuestionTitle")}
+                <Activity size={18} aria-hidden="true" />
+                {tr(language, "taskDetail")}
               </div>
-            </div>
-            <form className="settings-body" onSubmit={(event) => void submitPlannerAnswer(event)}>
-              <div className="notice-line">{tr(language, "plannerQuestionIntro")}</div>
-              <pre className="planner-question-box">{plannerQuestions?.content}</pre>
-              <div className="field">
-                <label htmlFor="planner-answer">{tr(language, "plannerAnswer")}</label>
-                <textarea
-                  id="planner-answer"
-                  value={plannerAnswer}
-                  onChange={(event) => setPlannerAnswer(event.target.value)}
-                />
-              </div>
-              <button className="btn primary" disabled={isSubmittingPlannerAnswer || !plannerAnswer.trim()} type="submit">
-                <Play size={16} aria-hidden="true" />
-                {tr(language, "submitPlannerAnswer")}
+              <button className="btn" onClick={() => setDetailModalOpen(false)} type="button">
+                {tr(language, "close")}
               </button>
-            </form>
+            </div>
+            <TaskDetailView
+              language={language}
+              task={taskDetail}
+              tab={tab}
+              setTab={setTab}
+              notes={notes}
+              noteForm={noteForm}
+              setNoteForm={setNoteForm}
+              submitNote={submitNote}
+              exportConventions={exportConventions}
+              exportPreview={exportPreview}
+              followUpMessage={followUpMessage}
+              setFollowUpMessage={setFollowUpMessage}
+              createFollowUp={createFollowUpForSelectedTask}
+              isCreatingFollowUp={isCreatingFollowUp}
+              uploadAttachments={uploadTaskImages}
+              isUploadingAttachment={isUploadingAttachment}
+              selectTask={(taskId) => {
+                setSelectedTaskId(taskId);
+                setDetailModalOpen(true);
+              }}
+              knownTaskTags={knownTaskTags}
+              updateTaskTags={updateTaskTags}
+              deleteTaskTag={deleteGlobalTaskTag}
+              plannerQuestions={plannerQuestions}
+              plannerAnswer={plannerAnswer}
+              setPlannerAnswer={setPlannerAnswer}
+              submitPlannerAnswer={submitPlannerAnswer}
+              isSubmittingPlannerAnswer={isSubmittingPlannerAnswer}
+            />
           </section>
         </div>
       ) : null}
@@ -2222,6 +2464,59 @@ function ScopeImageAttachments(props: {
   );
 }
 
+function TaskSummaryPanel(props: {
+  language: UiLanguage;
+  task: TaskDetail;
+  openDetail: () => void;
+  startTask: () => Promise<void>;
+}): React.ReactElement {
+  const latestVerification = props.task.verifications.at(-1);
+  const latestEvent = buildTaskTimeline(props.task, props.language).at(-1);
+  return (
+    <div className="task-summary-panel">
+      <div className="meta-row">
+        <span className={`pill ${props.task.status}`}>{statusLabel(props.task.status, props.language)}</span>
+        {taskTagsOf(props.task).map((tag) => (
+          <span className="pill group" key={tag}>
+            {taskTagLabel(tag, props.language)}
+          </span>
+        ))}
+      </div>
+      <div>
+        <div className="section-title">{tr(props.language, "selectedTaskSummary")}</div>
+        <h2>{props.task.title}</h2>
+        <p>{props.task.goal}</p>
+      </div>
+      <div className="summary-facts">
+        <span>{planningModeLabel(props.task.planningMode, props.language)}</span>
+        <span>{verificationModeLabel(props.task.verificationMode, props.language)}</span>
+        <span>
+          {tr(props.language, "round")} {props.task.currentRound}
+        </span>
+      </div>
+      {latestVerification ? (
+        <div className={`notice-line summary-decision ${latestVerification.decision}`}>
+          {latestVerification.decision}: {shortText(latestVerification.decision === "pass" ? localizedAgentOutput(latestVerification.summary, props.language) : friendlyFailureReason(latestVerification.summary, props.language), 180)}
+        </div>
+      ) : latestEvent ? (
+        <div className="notice-line">{latestEvent.title}</div>
+      ) : null}
+      {props.task.failureReason ? <div className="error-text">{friendlyFailureReason(props.task.failureReason, props.language)}</div> : null}
+      <div className="workspace-path">{props.task.worktreePath || props.task.targetProjectPath}</div>
+      <div className="button-row">
+        <button className="btn primary" onClick={props.openDetail} type="button">
+          <Activity size={16} aria-hidden="true" />
+          {tr(props.language, "openDetail")}
+        </button>
+        <button className="btn" onClick={() => void props.startTask()} type="button">
+          <Play size={16} aria-hidden="true" />
+          {tr(props.language, "run")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function TaskDetailView(props: {
   language: UiLanguage;
   task: TaskDetail;
@@ -2259,11 +2554,18 @@ function TaskDetailView(props: {
   knownTaskTags: string[];
   updateTaskTags: (taskId: string, tags: string[]) => Promise<void>;
   deleteTaskTag: (tag: string) => Promise<void>;
+  plannerQuestions: BrokerArtifact | null;
+  plannerAnswer: string;
+  setPlannerAnswer: React.Dispatch<React.SetStateAction<string>>;
+  submitPlannerAnswer: (event: FormEvent) => Promise<void>;
+  isSubmittingPlannerAnswer: boolean;
 }): React.ReactElement {
   const tabs = tabLabels(props.language);
   const [detailTagInput, setDetailTagInput] = useState("");
   const currentTags = taskTagsOf(props.task);
   const allDetailTags = Array.from(new Set([...props.knownTaskTags, ...currentTags])).sort((a, b) => a.localeCompare(b));
+  const timeline = buildTaskTimeline(props.task, props.language);
+  const shouldAnswerPlanner = props.task.status === "waiting_for_user" && Boolean(props.plannerQuestions);
 
   function toggleDetailTag(tag: string): void {
     const nextTags = currentTags.includes(tag) ? currentTags.filter((item) => item !== tag) : [...currentTags, tag];
@@ -2280,7 +2582,7 @@ function TaskDetailView(props: {
   }
 
   return (
-    <div className="detail-grid">
+    <div className="detail-grid task-detail-body">
       <div className="meta-row">
         <span className={`pill ${props.task.status}`}>{statusLabel(props.task.status, props.language)}</span>
         {currentTags.map((tag) => (
@@ -2299,8 +2601,31 @@ function TaskDetailView(props: {
         <h2 style={{ margin: "0 0 6px", fontSize: 18 }}>{props.task.title}</h2>
         <p style={{ margin: 0, color: "var(--muted)", lineHeight: 1.5 }}>{props.task.goal}</p>
       </div>
-      {props.task.failureReason ? <div className="error-text">{props.task.failureReason}</div> : null}
+      {props.task.failureReason ? <div className="error-text">{friendlyFailureReason(props.task.failureReason, props.language)}</div> : null}
       <div className="workspace-path">{props.task.worktreePath || props.task.targetProjectPath}</div>
+
+      {shouldAnswerPlanner ? (
+        <form className="planner-answer-card" onSubmit={(event) => void props.submitPlannerAnswer(event)}>
+          <div className="section-title">
+            <ShieldQuestion size={16} aria-hidden="true" />
+            {tr(props.language, "plannerQuestionTitle")}
+          </div>
+          <div className="notice-line">{tr(props.language, "plannerQuestionIntro")}</div>
+          <pre className="planner-question-box">{props.plannerQuestions?.content}</pre>
+          <div className="field">
+            <label htmlFor="planner-answer">{tr(props.language, "plannerAnswer")}</label>
+            <textarea
+              id="planner-answer"
+              value={props.plannerAnswer}
+              onChange={(event) => props.setPlannerAnswer(event.target.value)}
+            />
+          </div>
+          <button className="btn primary" disabled={props.isSubmittingPlannerAnswer || !props.plannerAnswer.trim()} type="submit">
+            <Play size={16} aria-hidden="true" />
+            {tr(props.language, "submitPlannerAnswer")}
+          </button>
+        </form>
+      ) : null}
 
       <section className="tag-editor">
         <div className="section-title">{tr(props.language, "taskGroups")}</div>
@@ -2357,6 +2682,38 @@ function TaskDetailView(props: {
         </div>
       ) : null}
 
+      <section className="timeline-section">
+        <div className="section-title">
+          <Activity size={16} aria-hidden="true" />
+          {tr(props.language, "taskTimeline")}
+        </div>
+        {timeline.length === 0 ? (
+          <div className="empty">{tr(props.language, "noAgentRuns")}</div>
+        ) : (
+          <div className="timeline-list">
+            {timeline.map((event) => (
+              <article className={`timeline-item ${event.tone || ""}`} key={event.id}>
+                <div className="timeline-marker" aria-hidden="true" />
+                <div className="timeline-card">
+                  <header>
+                    <strong>{event.title}</strong>
+                    <span>{event.meta}</span>
+                  </header>
+                  <p>{event.body}</p>
+                  <small>{event.time}</small>
+                  {!event.hideRaw && event.raw ? (
+                    <details className="timeline-raw">
+                      <summary>{event.rawLabel}</summary>
+                      <pre>{event.raw}</pre>
+                    </details>
+                  ) : null}
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+
       <TaskAttachments
         language={props.language}
         attachments={props.task.attachments}
@@ -2390,34 +2747,38 @@ function TaskDetailView(props: {
         </div>
       ) : null}
 
-      <div className="tabs">
-        {tabs.map((item) => (
-          <button
-            className={`tab ${props.tab === item.id ? "active" : ""}`}
-            key={item.id}
-            onClick={() => props.setTab(item.id)}
-          >
-            {item.icon}
-            {item.label}
-          </button>
-        ))}
-      </div>
+      <details className="raw-details">
+        <summary>{tr(props.language, "rawDetails")}</summary>
+        <div className="tabs">
+          {tabs.map((item) => (
+            <button
+              className={`tab ${props.tab === item.id ? "active" : ""}`}
+              key={item.id}
+              onClick={() => props.setTab(item.id)}
+              type="button"
+            >
+              {item.icon}
+              {item.label}
+            </button>
+          ))}
+        </div>
 
-      {props.tab === "agents" ? <AgentRuns language={props.language} runs={props.task.agentRuns} /> : null}
-      {props.tab === "artifacts" ? <BrokerArtifacts language={props.language} artifacts={props.task.brokerArtifacts} /> : null}
-      {props.tab === "shell" ? <ShellLogs language={props.language} logs={props.task.shellLogs} /> : null}
-      {props.tab === "verifications" ? <Verifications language={props.language} verifications={props.task.verifications} /> : null}
-      {props.tab === "conventions" ? (
-        <ConventionPanel
-          language={props.language}
-          notes={props.notes}
-          form={props.noteForm}
-          setForm={props.setNoteForm}
-          submitNote={props.submitNote}
-          exportConventions={props.exportConventions}
-          exportPreview={props.exportPreview}
-        />
-      ) : null}
+        {props.tab === "agents" ? <AgentRuns language={props.language} runs={props.task.agentRuns} /> : null}
+        {props.tab === "artifacts" ? <BrokerArtifacts language={props.language} artifacts={props.task.brokerArtifacts} /> : null}
+        {props.tab === "shell" ? <ShellLogs language={props.language} logs={props.task.shellLogs} /> : null}
+        {props.tab === "verifications" ? <Verifications language={props.language} verifications={props.task.verifications} /> : null}
+        {props.tab === "conventions" ? (
+          <ConventionPanel
+            language={props.language}
+            notes={props.notes}
+            form={props.noteForm}
+            setForm={props.setNoteForm}
+            submitNote={props.submitNote}
+            exportConventions={props.exportConventions}
+            exportPreview={props.exportPreview}
+          />
+        ) : null}
+      </details>
     </div>
   );
 }
@@ -2540,8 +2901,9 @@ function AgentRuns({ language, runs }: { language: UiLanguage; runs: AgentRun[] 
     <div className="log-stack">
       {runs.map((run) => {
         const rawOutput = run.error || run.output || "Running...";
-        const displayOutput = localizedAgentOutput(rawOutput, language);
-        const showOriginal = language === "ko" && displayOutput !== rawOutput;
+        const failedRun = run.status === "failed" || Boolean(run.error) || run.timedOut;
+        const displayOutput = failedRun ? friendlyFailureReason(rawOutput, language) : localizedAgentOutput(rawOutput, language);
+        const showOriginal = !failedRun && language === "ko" && displayOutput !== rawOutput;
         return (
           <div className="log-entry" key={run.id}>
             <header>
@@ -2584,17 +2946,20 @@ function ShellLogs({ language, logs }: { language: UiLanguage; logs: ShellLog[] 
   }
   return (
     <div className="log-stack">
-      {logs.map((log) => (
-        <div className="log-entry" key={log.id}>
-          <header>
-            <span>
-              {log.agentRole} / exit {log.exitCode ?? "signal"} / {log.durationMs}ms
-            </span>
-            <span>{log.createdAt}</span>
-          </header>
-          <pre>{`PS ${log.cwd}> ${log.command}\n\nSTDOUT\n${log.stdout}\n\nSTDERR\n${log.stderr}`}</pre>
-        </div>
-      ))}
+      {logs.map((log) => {
+        const shellFailed = log.exitCode !== null && log.exitCode !== 0;
+        return (
+          <div className="log-entry" key={log.id}>
+            <header>
+              <span>
+                {log.agentRole} / exit {log.exitCode ?? "signal"} / {log.durationMs}ms
+              </span>
+              <span>{log.createdAt}</span>
+            </header>
+            <pre>{shellFailed ? friendlyShellFailure(log, language) : `PS ${log.cwd}> ${log.command}\n\nSTDOUT\n${log.stdout}\n\nSTDERR\n${log.stderr}`}</pre>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -2613,7 +2978,7 @@ function Verifications({ language, verifications }: { language: UiLanguage; veri
             </span>
             <span>{verification.exitCode === null ? (language === "ko" ? "명령 없음" : "no command") : `exit ${verification.exitCode}`}</span>
           </header>
-          <pre>{verification.summary}</pre>
+          <pre>{verification.decision === "pass" ? localizedAgentOutput(verification.summary, language) : friendlyFailureReason(verification.summary, language)}</pre>
         </div>
       ))}
     </div>
