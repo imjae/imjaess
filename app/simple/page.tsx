@@ -41,10 +41,9 @@ import styles from "./simple.module.css";
 const defaultProjectPath = "D:\\dev\\Deluge";
 const conversationStorageKey = "oh-my-codex-simple-conversation";
 const settingsStorageKey = "oh-my-codex-simple-settings";
-const transcriptHeightStorageKey = "oh-my-codex-simple-transcript-height";
-const defaultTranscriptHeight = 520;
-const minTranscriptHeight = 260;
-const maxTranscriptHeight = 900;
+const agentSummaryHeightStorageKey = "oh-my-codex-simple-agent-summary-height";
+const defaultAgentSummaryHeight = 260;
+const minAgentSummaryHeight = 140;
 
 type SimpleSettings = {
   targetProjectPath: string;
@@ -292,16 +291,16 @@ function loadStoredSettings(): SimpleSettings {
   }
 }
 
-function clampTranscriptHeight(value: number): number {
-  return Math.max(minTranscriptHeight, Math.min(maxTranscriptHeight, Math.round(value)));
+function clampAgentSummaryHeight(value: number): number {
+  return Math.max(minAgentSummaryHeight, Math.round(value));
 }
 
-function loadStoredTranscriptHeight(): number {
+function loadStoredAgentSummaryHeight(): number {
   if (typeof window === "undefined") {
-    return defaultTranscriptHeight;
+    return defaultAgentSummaryHeight;
   }
-  const parsed = Number.parseInt(window.localStorage.getItem(transcriptHeightStorageKey) || "", 10);
-  return Number.isFinite(parsed) ? clampTranscriptHeight(parsed) : defaultTranscriptHeight;
+  const parsed = Number.parseInt(window.localStorage.getItem(agentSummaryHeightStorageKey) || "", 10);
+  return Number.isFinite(parsed) ? clampAgentSummaryHeight(parsed) : defaultAgentSummaryHeight;
 }
 
 export default function SimplePage(): React.ReactElement {
@@ -328,7 +327,7 @@ export default function SimplePage(): React.ReactElement {
   const [isSending, setIsSending] = useState(false);
   const [isHydrated, setIsHydrated] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [transcriptHeight, setTranscriptHeight] = useState(defaultTranscriptHeight);
+  const [agentSummaryHeight, setAgentSummaryHeight] = useState(defaultAgentSummaryHeight);
 
   const activeTask = taskDetails[taskDetails.length - 1] || null;
   const plannerQuestions = latestArtifact(activeTask, "plan_questions");
@@ -346,7 +345,7 @@ export default function SimplePage(): React.ReactElement {
   useEffect(() => {
     setConversationIds(loadStoredConversation());
     setSettings(loadStoredSettings());
-    setTranscriptHeight(loadStoredTranscriptHeight());
+    setAgentSummaryHeight(loadStoredAgentSummaryHeight());
     setIsHydrated(true);
   }, []);
 
@@ -368,8 +367,8 @@ export default function SimplePage(): React.ReactElement {
     if (!isHydrated) {
       return;
     }
-    window.localStorage.setItem(transcriptHeightStorageKey, String(transcriptHeight));
-  }, [transcriptHeight, isHydrated]);
+    window.localStorage.setItem(agentSummaryHeightStorageKey, String(agentSummaryHeight));
+  }, [agentSummaryHeight, isHydrated]);
 
   async function refreshConversation(ids = conversationIds): Promise<void> {
     const tasksData = await jsonFetch<TasksResponse>("/api/tasks");
@@ -596,7 +595,7 @@ export default function SimplePage(): React.ReactElement {
         setSelectedSuggestionIndex((current) => (current - 1 + pathSuggestions.length) % pathSuggestions.length);
         return;
       }
-      if (pathSuggestions.length > 0 && (event.key === "Enter" || event.key === "Tab")) {
+      if (pathSuggestions.length > 0 && event.key === "Tab") {
         event.preventDefault();
         insertScopeSuggestion(pathSuggestions[selectedSuggestionIndex]);
         return;
@@ -607,7 +606,7 @@ export default function SimplePage(): React.ReactElement {
         return;
       }
     }
-    if (event.key === "Enter" && !event.shiftKey) {
+    if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !event.nativeEvent.isComposing) {
       event.preventDefault();
       void submitMessage();
     }
@@ -676,10 +675,10 @@ export default function SimplePage(): React.ReactElement {
     setError(null);
   }
 
-  function startTranscriptResize(event: React.PointerEvent<HTMLButtonElement>): void {
+  function startAgentSummaryResize(event: React.PointerEvent<HTMLButtonElement>): void {
     event.preventDefault();
     const startY = event.clientY;
-    const startHeight = transcriptHeight;
+    const startHeight = agentSummaryHeight;
     const previousCursor = document.body.style.cursor;
     const previousUserSelect = document.body.style.userSelect;
 
@@ -687,7 +686,7 @@ export default function SimplePage(): React.ReactElement {
     document.body.style.userSelect = "none";
 
     const handlePointerMove = (moveEvent: PointerEvent) => {
-      setTranscriptHeight(clampTranscriptHeight(startHeight + moveEvent.clientY - startY));
+      setAgentSummaryHeight(clampAgentSummaryHeight(startHeight + moveEvent.clientY - startY));
     };
     const handlePointerUp = () => {
       document.body.style.cursor = previousCursor;
@@ -720,11 +719,11 @@ export default function SimplePage(): React.ReactElement {
           <h1 className={styles.headline}>{repositoryName}에서 무엇을 빌드할까요?</h1>
           <ConversationTranscript
             activeTaskId={activeTask?.id || null}
+            agentSummaryHeight={agentSummaryHeight}
             details={orderedDetails}
-            onResizeStart={startTranscriptResize}
             onCancelTask={cancelTask}
+            onSummaryResizeStart={startAgentSummaryResize}
             plannerQuestions={plannerQuestions}
-            transcriptHeight={transcriptHeight}
           />
           <form className={styles.composer} onSubmit={(event) => void submitMessage(event)}>
             {isAnsweringPlanner ? (
@@ -876,7 +875,7 @@ export default function SimplePage(): React.ReactElement {
                 <ShieldCheck size={14} aria-hidden="true" />
                 권한
               </button>
-              <button className={styles.sendButton} disabled={!canSend} type="submit" title="전송">
+              <button className={styles.sendButton} disabled={!canSend} type="submit" title="Ctrl+Enter">
                 {isSending ? <LoaderCircle className={styles.spin} size={19} aria-hidden="true" /> : <ArrowUp size={19} aria-hidden="true" />}
               </button>
             </div>
@@ -1000,24 +999,22 @@ function BranchSelect(props: {
 
 function ConversationTranscript(props: {
   activeTaskId: string | null;
+  agentSummaryHeight: number;
   details: TaskDetail[];
   onCancelTask: (taskId: string) => Promise<void>;
-  onResizeStart: (event: React.PointerEvent<HTMLButtonElement>) => void;
+  onSummaryResizeStart: (event: React.PointerEvent<HTMLButtonElement>) => void;
   plannerQuestions: BrokerArtifact | null;
-  transcriptHeight: number;
 }): React.ReactElement | null {
   if (props.details.length === 0) {
     return null;
   }
 
   return (
-    <section
-      className={styles.transcriptFrame}
-      style={{ "--transcript-height": `${props.transcriptHeight}px` } as React.CSSProperties}
-    >
+    <section className={styles.transcriptFrame}>
       <div className={styles.transcript} aria-label="Simple UI conversation transcript">
         {props.details.map((task, index) => (
           <TaskConversationItem
+            agentSummaryHeight={props.agentSummaryHeight}
             isActive={task.id === props.activeTaskId}
             isRoot={index === 0}
             key={task.id}
@@ -1028,10 +1025,10 @@ function ConversationTranscript(props: {
         ))}
       </div>
       <button
-        aria-label="Resize conversation height"
+        aria-label="Resize agent summary height"
         className={styles.resizeHandle}
-        onPointerDown={props.onResizeStart}
-        title="Resize conversation height"
+        onPointerDown={props.onSummaryResizeStart}
+        title="Resize agent summary height"
         type="button"
       >
         <GripHorizontal size={18} aria-hidden="true" />
@@ -1042,6 +1039,7 @@ function ConversationTranscript(props: {
 
 function TaskConversationItem(props: {
   task: TaskDetail;
+  agentSummaryHeight: number;
   isRoot: boolean;
   isActive: boolean;
   onCancelTask: (taskId: string) => Promise<void>;
@@ -1060,7 +1058,10 @@ function TaskConversationItem(props: {
         </div>
         <p>{userPromptFromTask(props.task)}</p>
       </div>
-      <div className={classNames(styles.agentCard, props.isActive && styles.activeAgentCard)}>
+      <div
+        className={classNames(styles.agentCard, props.isActive && styles.activeAgentCard)}
+        style={{ "--agent-summary-height": `${props.agentSummaryHeight}px` } as React.CSSProperties}
+      >
         <div className={styles.agentHeader}>
           <span className={classNames(styles.statusDot, styles[`status-${props.task.status}`])} />
           <div>
@@ -1086,7 +1087,7 @@ function TaskConversationItem(props: {
         {props.task.status === "waiting_for_user" && props.plannerQuestions ? (
           <div className={styles.plannerCard}>
             <CircleAlert size={16} aria-hidden="true" />
-            <div>
+            <div className={styles.summaryBody}>
               <strong>Planner question</strong>
               <pre>{trimText(props.plannerQuestions.content, 1200)}</pre>
             </div>
@@ -1095,7 +1096,11 @@ function TaskConversationItem(props: {
         {artifacts.length > 0 ? (
           <div className={styles.artifactList}>
             {artifacts.slice(-4).map((artifact) => (
-              <details key={artifact.id} className={styles.artifactItem} open={artifact.kind === "final_brief"}>
+              <details
+                key={artifact.id}
+                className={styles.artifactItem}
+                open={artifact.kind === "final_brief" || (props.task.status === "canceled" && artifact.kind === "plan_questions")}
+              >
                 <summary>
                   <Sparkles size={14} aria-hidden="true" />
                   {artifactLabels[artifact.kind]}

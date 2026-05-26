@@ -537,29 +537,26 @@
 
 .transcriptFrame {
   width: min(100%, 900px);
-  height: var(--transcript-height);
-  min-height: 260px;
   margin: 0 auto;
   display: grid;
-  grid-template-rows: minmax(0, 1fr) 18px;
+  gap: 4px;
 }
 
 .transcript {
   display: grid;
   gap: 18px;
-  min-height: 0;
-  overflow: auto;
+  align-content: start;
+  overflow: visible;
   padding: 4px 8px 2px;
-  scrollbar-color: #565650 transparent;
 }
 
 .resizeHandle {
   display: inline-grid;
   place-items: center;
   justify-self: center;
-  align-self: stretch;
-  width: 74px;
+  width: 84px;
   min-width: 44px;
+  height: 18px;
   border: 0;
   border-radius: 999px;
   background: transparent;
@@ -750,6 +747,11 @@
   color: #ffd89a;
 }
 
+.summaryBody {
+  min-width: 0;
+  flex: 1;
+}
+
 .plannerCard strong,
 .verification strong {
   display: block;
@@ -759,14 +761,41 @@
 .plannerCard pre,
 .artifactItem pre {
   margin: 0;
-  max-height: 260px;
+  max-height: var(--agent-summary-height, 260px);
   overflow: auto;
+  scrollbar-color: rgba(202, 202, 196, 0.3) transparent;
+  scrollbar-width: thin;
   white-space: pre-wrap;
   word-break: break-word;
   color: inherit;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 12px;
   line-height: 1.55;
+}
+
+.plannerCard pre::-webkit-scrollbar,
+.artifactItem pre::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.plannerCard pre::-webkit-scrollbar-track,
+.artifactItem pre::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.plannerCard pre::-webkit-scrollbar-thumb,
+.artifactItem pre::-webkit-scrollbar-thumb {
+  background: rgba(202, 202, 196, 0.22);
+  background-clip: content-box;
+  border: 2px solid transparent;
+  border-radius: 999px;
+}
+
+.plannerCard pre::-webkit-scrollbar-thumb:hover,
+.artifactItem pre::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 177, 121, 0.42);
+  background-clip: content-box;
 }
 
 .artifactList {
@@ -909,14 +938,6 @@
   .sendButton {
     margin-left: 0;
     justify-self: end;
-  }
-
-  .transcript {
-    padding: 0;
-  }
-
-  .transcriptFrame {
-    height: var(--transcript-height);
   }
 
   .userBubble,
