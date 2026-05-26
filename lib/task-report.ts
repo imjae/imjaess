@@ -9,6 +9,8 @@ const REPORT_TEXT = {
     decision: "Decision",
     taskId: "Task ID",
     group: "Tags",
+    planningMode: "Planning Mode",
+    verificationMode: "Verification Mode",
     ungrouped: "Ungrouped",
     project: "Project",
     worktree: "Worktree",
@@ -68,7 +70,7 @@ const REPORT_TEXT = {
 } as const;
 
 function rt(language: TaskReportLanguage, key: keyof typeof REPORT_TEXT.en): string {
-  return REPORT_TEXT[language][key] || REPORT_TEXT.en[key];
+  return (REPORT_TEXT[language] as Partial<Record<keyof typeof REPORT_TEXT.en, string>>)[key] || REPORT_TEXT.en[key];
 }
 
 function fenced(text: string): string {
@@ -145,6 +147,8 @@ export function taskReportMarkdown(
     `${rt(language, "decision")}: ${latestVerification?.decision || "n/a"}`,
     `${rt(language, "taskId")}: ${task.id}`,
     `${rt(language, "group")}: ${task.tags.length > 0 ? task.tags.join(", ") : task.taskGroup || rt(language, "ungrouped")}`,
+    `${rt(language, "planningMode")}: ${task.planningMode}`,
+    `${rt(language, "verificationMode")}: ${task.verificationMode}`,
     `${rt(language, "project")}: ${task.targetProjectPath}`,
     `${rt(language, "worktree")}: ${task.worktreePath || "n/a"}`,
     `${rt(language, "created")}: ${task.createdAt}`,

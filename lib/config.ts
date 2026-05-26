@@ -2,7 +2,7 @@ import type { AgentProvider, AgentReasoningEffort, AgentRole, AgentServiceTier }
 import { getAgentSetting } from "@/lib/db";
 import { defaultModelForProvider } from "@/lib/model-catalog";
 
-export const agentRoles = ["researcher", "implementer", "tester", "verifier"] as const satisfies AgentRole[];
+export const agentRoles = ["researcher", "planner", "implementer", "tester", "verifier"] as const satisfies AgentRole[];
 
 const reasoningEfforts = new Set<AgentReasoningEffort>([
   "default",

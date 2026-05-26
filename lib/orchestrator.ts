@@ -4,6 +4,7 @@ import {
   createTaskRun,
   finishAgentRun,
   finishTaskRun,
+  getBrokerArtifact,
   getProjectByPath,
   getTask,
   insertBrokerArtifact,
@@ -34,9 +35,10 @@ import { cleanupSingleTaskWorktrees, cleanupSpecificWorktree } from "@/lib/workt
 function defaultAgentPlan(): string {
   return [
     "1. Researcher collects isolated evidence and repository facts.",
-    "2. Implementer changes code using only the broker evidence pack.",
-    "3. Tester validates independently from implementation intent.",
-    "4. Verifier decides pass, needs_fix, or blocked from broker artifacts and test evidence."
+    "2. Plan mode inserts a Planner that asks the user clarifying questions before implementation.",
+    "3. Implementer changes code using only broker evidence and the approved plan brief.",
+    "4. Verifier decides pass, needs_fix, or blocked from broker artifacts, diff summary, and optional test evidence.",
+    "5. Balanced verification mode inserts an independent Tester before Verifier."
   ].join("\n");
 }
 
@@ -174,8 +176,9 @@ export async function processTask(taskId: string): Promise<void> {
     for (let round = 1; round <= rounds; round += 1) {
       updateTask(taskId, { status: "running", currentRound: round });
       const refreshedTask = getTask(taskId) || task;
+      const existingEvidencePack = getBrokerArtifact(taskId, round, "evidence_pack");
       const researcherWorkspace =
-        implementationBaseRef === "HEAD"
+        existingEvidencePack || implementationBaseRef === "HEAD"
           ? {
               path: projectPath,
               kind: "direct" as const,
@@ -190,34 +193,99 @@ export async function processTask(taskId: string): Promise<void> {
               baseRef: implementationBaseRef
             });
       const scopeReferenceContext = await buildScopeReferenceContext(task.scope, researcherWorkspace.path);
-      const researcherPrompt = [
-        taskBrief(refreshedTask, round, brokerBrief, scopeReferenceContext),
-        `Your assigned workspace: ${researcherWorkspace.path}`,
-        researcherWorkspace.branchName ? `Your branch: ${researcherWorkspace.branchName}` : "",
-        "Collect only the facts needed for this task: relevant files, likely entry points, constraints, commands, and risks.",
-        "Do not implement. Do not review another agent. End with evidence that the broker can pass to an implementer."
-      ]
-        .filter(Boolean)
-        .join("\n\n");
-      const researcherOutput = await runRole({
-        task: refreshedTask,
-        role: "researcher",
-        round,
-        prompt: researcherPrompt,
-        workspacePath: researcherWorkspace.path,
-        branchName: researcherWorkspace.branchName
-      });
-      const evidencePack = brokerArtifact({
-        taskId,
-        round,
-        sourceRole: "researcher",
-        kind: "evidence_pack",
-        content: [
-          "BROKER EVIDENCE PACK",
-          "This is the only researcher output visible to the implementer.",
-          researcherOutput
-        ].join("\n\n")
-      });
+      let evidencePack = existingEvidencePack?.content || "";
+      if (!evidencePack) {
+        const researcherPrompt = [
+          taskBrief(refreshedTask, round, brokerBrief, scopeReferenceContext),
+          `Your assigned workspace: ${researcherWorkspace.path}`,
+          researcherWorkspace.branchName ? `Your branch: ${researcherWorkspace.branchName}` : "",
+          "Collect only the facts needed for this task: relevant files, likely entry points, constraints, commands, and risks.",
+          "Do not implement. Do not review another agent. End with evidence that the broker can pass to an implementer."
+        ]
+          .filter(Boolean)
+          .join("\n\n");
+        const researcherOutput = await runRole({
+          task: refreshedTask,
+          role: "researcher",
+          round,
+          prompt: researcherPrompt,
+          workspacePath: researcherWorkspace.path,
+          branchName: researcherWorkspace.branchName
+        });
+        evidencePack = brokerArtifact({
+          taskId,
+          round,
+          sourceRole: "researcher",
+          kind: "evidence_pack",
+          content: [
+            "BROKER EVIDENCE PACK",
+            "This is the only researcher output visible to the implementer.",
+            researcherOutput
+          ].join("\n\n")
+        });
+      }
+
+      let planBrief = "";
+      if (refreshedTask.planningMode === "plan" && round === 1) {
+        const existingPlanBrief = getBrokerArtifact(taskId, round, "plan_brief");
+        planBrief = existingPlanBrief?.content || "";
+        if (!planBrief) {
+          const existingPlanQuestions = getBrokerArtifact(taskId, round, "plan_questions");
+          const planAnswer = getBrokerArtifact(taskId, round, "plan_answer");
+          if (!planAnswer) {
+            updateTask(taskId, { status: "reviewing" });
+            if (!existingPlanQuestions) {
+              const plannerOutput = await runRole({
+                task: refreshedTask,
+                role: "planner",
+                round,
+                prompt: [
+                  taskBrief(refreshedTask, round, brokerBrief, scopeReferenceContext),
+                  `Your assigned planner workspace: ${researcherWorkspace.path}`,
+                  "Use only the broker evidence pack and task brief.",
+                  `Broker evidence pack:\n${evidencePack}`,
+                  "Ask the user only the questions required before implementation. Prefer 2-5 concrete questions.",
+                  "Also include a short draft implementation plan that can be revised after the user's answer.",
+                  "Do not implement and do not test."
+                ]
+                  .filter(Boolean)
+                  .join("\n\n"),
+                workspacePath: researcherWorkspace.path,
+                branchName: researcherWorkspace.branchName
+              });
+              brokerArtifact({
+                taskId,
+                round,
+                sourceRole: "planner",
+                kind: "plan_questions",
+                content: [
+                  "BROKER PLANNER QUESTIONS",
+                  "The task is waiting for the user's answer. User waiting time is not counted against an agent time budget.",
+                  plannerOutput
+                ].join("\n\n")
+              });
+            }
+            updateTask(taskId, {
+              status: "waiting_for_user",
+              failureReason: "Planner is waiting for user answers before implementation."
+            });
+            finalStatus = "waiting_for_user";
+            return;
+          }
+          planBrief = brokerArtifact({
+            taskId,
+            round,
+            sourceRole: "broker",
+            kind: "plan_brief",
+            content: [
+              "BROKER PLAN BRIEF",
+              "This is the only planning handoff visible to the implementer.",
+              existingPlanQuestions ? `Planner questions and draft plan:\n${existingPlanQuestions.content}` : "",
+              `User answer:\n${planAnswer.content}`
+            ].join("\n\n")
+          });
+        }
+      }
 
       const implementerWorkspace = await createAgentWorkspace({
         taskId,
@@ -235,7 +303,8 @@ export async function processTask(taskId: string): Promise<void> {
         `Your isolated implementation worktree: ${implementerWorkspace.path}`,
         implementerWorkspace.branchName ? `Your branch: ${implementerWorkspace.branchName}` : "",
         `Broker evidence pack:\n${evidencePack}`,
-        "Implement only from the broker evidence pack and the task brief.",
+        planBrief ? `Broker plan brief:\n${planBrief}` : "",
+        "Implement only from the broker evidence pack, approved plan brief when present, and the task brief.",
         "Do not speculate about tester behavior. End with a concise private handoff summary for the broker."
       ]
         .filter(Boolean)
@@ -256,18 +325,22 @@ export async function processTask(taskId: string): Promise<void> {
       );
       implementationBaseRef = implementationCommit.ref;
 
-      const testerWorkspace = await createAgentWorkspace({
-        taskId,
-        role: "tester",
-        round,
-        targetProjectPath: task.targetProjectPath,
-        baseRef: implementationCommit.ref
-      });
+      const isBalancedVerification = refreshedTask.verificationMode === "balanced";
+      const testerWorkspace = isBalancedVerification
+        ? await createAgentWorkspace({
+            taskId,
+            role: "tester",
+            round,
+            targetProjectPath: task.targetProjectPath,
+            baseRef: implementationCommit.ref
+          })
+        : null;
+      const commandWorkspace = testerWorkspace || implementerWorkspace;
       const verificationPreparation =
         verificationCommand && isUnityDotnetVerificationCommand(verificationCommand)
           ? await prepareUnityDotnetVerificationWorkspace({
               sourceProjectPath: projectPath,
-              workspacePath: testerWorkspace.path,
+              workspacePath: commandWorkspace.path,
               implementationRef: implementationCommit.ref,
               implementationCommitted: implementationCommit.committed
             })
@@ -278,10 +351,10 @@ export async function processTask(taskId: string): Promise<void> {
       const commandResult = verificationCommand
         ? await runShell({
             taskId,
-            agentRole: "tester",
+            agentRole: isBalancedVerification ? "tester" : "verifier",
             command: verificationCommand,
-            cwd: testerWorkspace.path,
-            workspacePath: testerWorkspace.path,
+            cwd: commandWorkspace.path,
+            workspacePath: commandWorkspace.path,
             timeoutMs: verificationTimeoutMs(verificationCommand)
           })
         : null;
@@ -297,8 +370,9 @@ export async function processTask(taskId: string): Promise<void> {
           implementerWorkspace.branchName ? `Implementer branch: ${implementerWorkspace.branchName}` : "",
           `Implementation ref: ${implementationCommit.ref}`,
           `Implementation commit: ${implementationCommit.summary}`,
-          `Tester worktree: ${testerWorkspace.path}`,
-          testerWorkspace.branchName ? `Tester branch: ${testerWorkspace.branchName}` : "",
+          `Verification mode: ${isBalancedVerification ? "balanced" : "fast"}`,
+          testerWorkspace ? `Tester worktree: ${testerWorkspace.path}` : `Verifier/shell workspace: ${commandWorkspace.path}`,
+          testerWorkspace?.branchName ? `Tester branch: ${testerWorkspace.branchName}` : "",
           verificationPreparationSummary,
           `Diff summary:\n${diffSummary}`,
           commandResult
@@ -309,35 +383,35 @@ export async function processTask(taskId: string): Promise<void> {
           .join("\n\n")
       });
 
-      const testerPrompt = [
-        taskBrief(refreshedTask, round, "", scopeReferenceContext),
-        `Your isolated tester worktree: ${testerWorkspace.path}`,
-        testerWorkspace.branchName ? `Your branch: ${testerWorkspace.branchName}` : "",
-        `Broker implementation brief:\n${implementationBrief}`,
-        "Test independently from implementation intent. Use run_shell if needed.",
-        "Return what was tested, evidence, failures, and residual risk. Do not ask the implementer for clarification."
-      ]
-        .filter(Boolean)
-        .join("\n\n");
-      const testerOutput = await runRole({
-        task: refreshedTask,
-        role: "tester",
-        round,
-        prompt: testerPrompt,
-        workspacePath: testerWorkspace.path,
-        branchName: testerWorkspace.branchName
-      });
-      const testResult = brokerArtifact({
-        taskId,
-        round,
-        sourceRole: "tester",
-        kind: "test_result",
-        content: [
-          "BROKER TEST RESULT",
-          "This is the only tester output visible to the verifier.",
-          testerOutput
-        ].join("\n\n")
-      });
+      const testResult = testerWorkspace
+        ? brokerArtifact({
+            taskId,
+            round,
+            sourceRole: "tester",
+            kind: "test_result",
+            content: [
+              "BROKER TEST RESULT",
+              "This is the only tester output visible to the verifier.",
+              await runRole({
+                task: refreshedTask,
+                role: "tester",
+                round,
+                prompt: [
+                  taskBrief(refreshedTask, round, "", scopeReferenceContext),
+                  `Your isolated tester worktree: ${testerWorkspace.path}`,
+                  testerWorkspace.branchName ? `Your branch: ${testerWorkspace.branchName}` : "",
+                  `Broker implementation brief:\n${implementationBrief}`,
+                  "Test independently from implementation intent. Use run_shell if needed.",
+                  "Return what was tested, evidence, failures, and residual risk. Do not ask the implementer for clarification."
+                ]
+                  .filter(Boolean)
+                  .join("\n\n"),
+                workspacePath: testerWorkspace.path,
+                branchName: testerWorkspace.branchName
+              })
+            ].join("\n\n")
+          })
+        : "";
 
       updateTask(taskId, { status: "verifying" });
       const verifierWorkspace = implementerWorkspace;
@@ -348,7 +422,9 @@ export async function processTask(taskId: string): Promise<void> {
         "This verifier stage reuses the clean implementation worktree instead of creating another role worktree.",
         `Broker evidence pack:\n${evidencePack}`,
         `Broker implementation brief:\n${implementationBrief}`,
-        `Broker test result:\n${testResult}`,
+        testResult
+          ? `Broker test result:\n${testResult}`
+          : "No tester agent was run because verification mode is fast. Judge directly from evidence, implementation brief, diff summary, and optional shell evidence.",
         verificationPreparationSummary,
         commandResult
           ? `Verification command: ${commandResult.command}\nExit code: ${commandResult.exitCode}\nSTDOUT:\n${commandResult.stdout}\nSTDERR:\n${commandResult.stderr}`
@@ -366,11 +442,13 @@ export async function processTask(taskId: string): Promise<void> {
         branchName: verifierWorkspace.branchName
       });
       const parsed = parseVerifierDecision(verifierOutput);
-      await cleanupSpecificWorktree({
-        targetProjectPath: task.targetProjectPath,
-        worktreePath: testerWorkspace.path,
-        branchName: testerWorkspace.branchName
-      });
+      if (testerWorkspace) {
+        await cleanupSpecificWorktree({
+          targetProjectPath: task.targetProjectPath,
+          worktreePath: testerWorkspace.path,
+          branchName: testerWorkspace.branchName
+        });
+      }
       insertVerification({
         taskId,
         round,

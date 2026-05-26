@@ -161,6 +161,25 @@ button {
   box-shadow: 0 24px 70px rgba(32, 33, 36, 0.22);
 }
 
+.planner-modal {
+  width: min(720px, 100%);
+}
+
+.planner-question-box {
+  max-height: 280px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fcfcfb;
+  color: var(--ink);
+  padding: 12px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .modal-header {
   display: flex;
   align-items: center;
@@ -1015,6 +1034,11 @@ button {
 .pill.needs_fix {
   background: #fff0cf;
   color: #6b4a00;
+}
+
+.pill.waiting_for_user {
+  background: #efe7ff;
+  color: #53358c;
 }
 
 .pill.done {

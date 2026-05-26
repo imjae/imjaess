@@ -3,11 +3,12 @@ export type TaskStatus =
   | "running"
   | "reviewing"
   | "verifying"
+  | "waiting_for_user"
   | "needs_fix"
   | "done"
   | "blocked";
 
-export type AgentRole = "researcher" | "implementer" | "tester" | "verifier";
+export type AgentRole = "researcher" | "planner" | "implementer" | "tester" | "verifier";
 
 export type AgentProvider = "openai" | "codex-cli" | "mock";
 
@@ -16,6 +17,10 @@ export type AgentReasoningEffort = "default" | "none" | "minimal" | "low" | "med
 export type AgentServiceTier = "default" | "auto" | "fast";
 
 export type VerificationDecision = "pass" | "needs_fix" | "blocked";
+
+export type TaskVerificationMode = "fast" | "balanced";
+
+export type TaskPlanningMode = "direct" | "plan";
 
 export interface AgentSetting {
   role: AgentRole;
@@ -74,6 +79,8 @@ export interface Task {
   targetProjectPath: string;
   worktreePath: string | null;
   agentPlan: string;
+  planningMode: TaskPlanningMode;
+  verificationMode: TaskVerificationMode;
   approvalGrant: boolean;
   status: TaskStatus;
   currentRound: number;
@@ -122,7 +129,15 @@ export interface BrokerArtifact {
   taskId: string;
   round: number;
   sourceRole: AgentRole | "broker";
-  kind: "evidence_pack" | "implementation_brief" | "test_brief" | "test_result" | "final_brief";
+  kind:
+    | "evidence_pack"
+    | "plan_questions"
+    | "plan_answer"
+    | "plan_brief"
+    | "implementation_brief"
+    | "test_brief"
+    | "test_result"
+    | "final_brief";
   content: string;
   createdAt: string;
 }
@@ -182,6 +197,8 @@ export interface CreateTaskInput {
   scope?: string;
   targetProjectPath: string;
   agentPlan?: string;
+  planningMode?: TaskPlanningMode;
+  verificationMode?: TaskVerificationMode;
   approvalGrant?: boolean;
   verificationCommand?: string;
 }

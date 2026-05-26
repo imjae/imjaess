@@ -6,6 +6,7 @@ import {
   createTask,
   deleteTask,
   deleteTaskTag,
+  getProjectByPath,
   getTaskDetail,
   getDb,
   getNotionSettings,
@@ -18,7 +19,8 @@ import {
   resetDbForTests,
   updateNotionSettings,
   updateTask,
-  upsertImportedTask
+  upsertImportedTask,
+  upsertProject
 } from "@/lib/db";
 
 describe("task persistence", () => {
@@ -61,9 +63,52 @@ describe("task persistence", () => {
     expect(detail?.status).toBe("running");
     expect(detail?.taskGroup).toBe("Effects");
     expect(detail?.tags).toEqual(["Effects"]);
+    expect(detail?.planningMode).toBe("direct");
+    expect(detail?.verificationMode).toBe("fast");
     expect(detail?.currentRound).toBe(1);
     expect(detail?.shellLogs[0]?.command).toBe("echo ok");
     expect(detail?.shellLogs[0]?.exitCode).toBe(0);
+  });
+
+  it("stores balanced verification mode when requested", () => {
+    const task = createTask({
+      title: "Strict task",
+      goal: "Goal",
+      scope: "Scope",
+      targetProjectPath: "C:\\repo",
+      agentPlan: "Plan",
+      verificationMode: "balanced",
+      approvalGrant: true
+    });
+
+    expect(getTaskDetail(task.id)?.verificationMode).toBe("balanced");
+  });
+
+  it("stores plan mode when requested", () => {
+    const task = createTask({
+      title: "Plan task",
+      goal: "Goal",
+      scope: "Scope",
+      targetProjectPath: "C:\\repo",
+      agentPlan: "Plan",
+      planningMode: "plan",
+      approvalGrant: true
+    });
+
+    expect(getTaskDetail(task.id)?.planningMode).toBe("plan");
+  });
+
+  it("can clear a saved project verification command", () => {
+    upsertProject({
+      path: "C:\\repo",
+      verificationCommand: "dotnet build Deluge.sln --no-restore"
+    });
+    upsertProject({
+      path: "C:\\repo",
+      verificationCommand: null
+    });
+
+    expect(getProjectByPath("C:\\repo")?.verificationCommand).toBeNull();
   });
 
   it("records image attachments for task details", () => {

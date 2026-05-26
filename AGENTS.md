@@ -59,13 +59,21 @@ npm.cmd test
 npm.cmd run build
 ```
 
-For Unity target projects, use the project-specific verification command from the task. The default Unity gate is the fast Codex-style C# compile check:
+Task verification mode controls whether the tester agent runs:
 
-```powershell
-dotnet build Deluge.sln --no-restore
-```
+- `fast`: `researcher -> implementer -> verifier`; default for new tasks.
+- `balanced`: `researcher -> implementer -> tester -> verifier`; use when independent tester review is worth the extra time.
 
-For isolated Unity worktrees, generated `.sln` / `.csproj` files may be copied into the tester worktree and temporarily patched for added or removed `.cs` files before this command runs. Treat prefab, scene, and `.asset` edits as requiring static diff review plus manual Unity editor confirmation unless the task explicitly asks for batchmode.
+Task planning mode controls whether the planner agent pauses for user answers:
+
+- `direct`: `researcher -> implementer`; default for new tasks.
+- `plan`: `researcher -> planner -> waiting_for_user`; the web UI collects the user's answer, then the worker resumes with a broker `plan_brief`.
+
+Do not count user waiting time against an agent slice time budget. The planner agent may ask questions, but implementation must wait until the broker has a user answer.
+
+New tasks do not run a shell verification command by default. Use the project-specific verification command from the task only when the user explicitly configured one.
+
+For isolated Unity worktrees, generated `.sln` / `.csproj` files may be copied into the tester worktree and temporarily patched for added or removed `.cs` files only when the configured command is a `dotnet build ... .sln` command. Treat prefab, scene, and `.asset` edits as requiring static diff review plus manual Unity editor confirmation.
 
 ## Security Notes
 

@@ -3,8 +3,16 @@ import { buildManagedPrompt, compactHandoff, executionPolicy, withAgentTimeout }
 
 describe("execution policy", () => {
   afterEach(() => {
+    delete process.env.AGENT_CONTEXT_BUDGET_CHARS;
+    delete process.env.AGENT_OUTPUT_BUDGET_CHARS;
     delete process.env.AGENT_TIME_BUDGET_MS;
     delete process.env.IMPLEMENTER_TIME_BUDGET_MS;
+  });
+
+  it("uses larger default context and handoff budgets", () => {
+    const policy = executionPolicy("verifier");
+    expect(policy.contextBudgetChars).toBe(30_000);
+    expect(policy.outputBudgetChars).toBe(8_000);
   });
 
   it("gives implementer a 15 minute default time budget", () => {

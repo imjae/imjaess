@@ -14,7 +14,6 @@
   - `CODEX_CLI_SANDBOX`: Codex CLI provider의 sandbox 모드. Windows shell 실행은 `danger-full-access`가 필요할 수 있다.
   - `HARNESS_DB_PATH`: 로컬 SQLite 저장 위치. 기본값은 `.data/harness.sqlite`.
   - `HARNESS_ATTACHMENT_DIR`: 이미지 첨부 저장 위치. 비워두면 `.data/attachments`, 직접 지정할 경우 절대경로를 사용한다.
-  - `UNITY_EXECUTABLE_PATH`: Unity batchmode 검증에 사용할 `Unity.exe` 절대경로. 비워두면 Unity Hub 설치 경로와 PATH를 순서대로 찾는다.
   - `HARNESS_INTEGRATION_BRANCH`: 검증 통과 브랜치를 병합할 통합 브랜치. 기본값은 `imjae`.
   - `MAX_AGENT_ROUNDS`: 태스크당 자동 수정 반복 한도.
   - `AGENT_CONTEXT_BUDGET_CHARS`, `AGENT_OUTPUT_BUDGET_CHARS`, `AGENT_TIME_BUDGET_MS`: role별 컨텍스트, 출력, 시간 제한 기본값.
@@ -53,8 +52,12 @@
 
 - 검증 명령
   - 태스크 생성 시 프로젝트에 맞게 입력한다.
-  - Unity 기본값은 task worktree에서 실행하는 batchmode 검증이다.
-  - Unity가 자동 탐색되지 않으면 `.env.local`에 `UNITY_EXECUTABLE_PATH`를 입력한다.
+  - 기본값은 비워 둔다. 명시적으로 입력한 경우에만 shell 검증 명령이 실행된다.
+  - 검증 모드는 새 Task 기본값이 `fast`이며, 독립 Tester Agent가 필요한 경우 `balanced`를 선택한다.
+
+- Planning mode
+  - Default is `direct`.
+  - Choose `plan` when the Planner should ask questions before implementation. The task pauses as `waiting_for_user` and resumes after answers are submitted in the web UI.
 
 - Unity convention notes
   - UI의 Unity Rules 영역에서 프로젝트별 규칙을 추가한다.

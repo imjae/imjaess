@@ -6,7 +6,7 @@ import { defaultModelForProvider, isValidModelForProvider, modelCatalog } from "
 
 export const dynamic = "force-dynamic";
 
-const roleSchema = z.enum(["researcher", "implementer", "tester", "verifier"]);
+const roleSchema = z.enum(["researcher", "planner", "implementer", "tester", "verifier"]);
 const providerSchema = z.enum(["openai", "codex-cli", "mock"]);
 const reasoningEffortSchema = z.enum(["default", "none", "minimal", "low", "medium", "high", "xhigh"]);
 const serviceTierSchema = z.enum(["default", "auto", "fast"]);

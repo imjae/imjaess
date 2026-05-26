@@ -15,6 +15,8 @@ describe("taskReportMarkdown", () => {
       targetProjectPath: "D:\\dev\\Deluge",
       worktreePath: "D:\\dev\\Deluge\\.harness\\task-1",
       agentPlan: "",
+      planningMode: "direct",
+      verificationMode: "fast",
       approvalGrant: true,
       status: "done",
       currentRound: 1,
@@ -89,6 +91,8 @@ describe("taskReportMarkdown", () => {
     const markdown = taskReportMarkdown(task);
     expect(markdown).toContain("# Task: Fix inventory");
     expect(markdown).toContain("Tags: Game Logic, UI");
+    expect(markdown).toContain("Planning Mode: direct");
+    expect(markdown).toContain("Verification Mode: fast");
     expect(markdown).toContain("effect.png");
     expect(markdown).toContain("Approved evidence");
     expect(markdown).toContain("Passed verification.");

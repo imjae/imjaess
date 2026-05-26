@@ -15,6 +15,8 @@ const createTaskSchema = z.object({
   scope: z.string().optional().default(""),
   targetProjectPath: z.string().min(1),
   agentPlan: z.string().optional().default(""),
+  planningMode: z.enum(["direct", "plan"]).optional().default("direct"),
+  verificationMode: z.enum(["fast", "balanced"]).optional().default("fast"),
   approvalGrant: z.boolean().optional().default(false),
   verificationCommand: z.string().optional().default("")
 });
@@ -33,7 +35,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   const verificationCommand = normalizeVerificationCommand(body.verificationCommand);
   upsertProject({
     path: targetProjectPath,
-    verificationCommand
+    verificationCommand: verificationCommand || null
   });
   const task = createTask({
     title: body.title,
@@ -44,7 +46,9 @@ export async function POST(request: Request): Promise<NextResponse> {
     targetProjectPath,
     agentPlan:
       body.agentPlan ||
-      "Executor implements or investigates, Reviewer checks risks, Verifier decides pass/needs_fix/blocked.",
+      "Researcher collects evidence, optional Planner asks clarifying questions, Implementer changes code, Verifier decides pass/needs_fix/blocked.",
+    planningMode: body.planningMode,
+    verificationMode: body.verificationMode,
     approvalGrant: body.approvalGrant
   });
   if (task.approvalGrant) {

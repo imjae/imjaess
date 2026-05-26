@@ -122,6 +122,20 @@ Each agent run is managed as a short sub-agent slice:
 
 This keeps long tasks from loading one agent with all context, all roles, and all verification at once.
 
+## Verification Mode
+
+New tasks default to `Fast` verification:
+
+- `Fast`: runs `researcher -> implementer -> verifier`. The tester agent is skipped to reduce round time.
+- `Balanced`: runs `researcher -> implementer -> tester -> verifier` for higher-risk tasks that need an independent tester agent.
+
+## Planning Mode
+
+New tasks default to `Direct` planning:
+
+- `Direct`: runs implementation after the researcher evidence pack is ready.
+- `Plan`: runs `researcher -> planner`, pauses the task as `waiting_for_user`, shows the planner questions in the web UI, then resumes after the user submits answers. User waiting time is not counted against agent time budgets.
+
 ## Verification
 
 ```powershell
@@ -130,13 +144,9 @@ npm.cmd test
 npm.cmd run build
 ```
 
-For Unity projects, the default verification command in the UI uses the same fast C# compile gate Codex usually runs:
+New tasks do not run a shell verification command by default. Leave the verification command blank for broker/artifact-based validation, or enter a project-specific command when a task needs an explicit gate.
 
-```powershell
-dotnet build Deluge.sln --no-restore
-```
-
-When this command runs from an isolated Unity worktree, the harness copies generated `.sln` / `.csproj` files from the source checkout into the tester worktree and temporarily patches added or removed `.cs` files into the copied project file. These generated files are verification inputs only and are not committed. Prefab, scene, and `.asset` changes are reported as residual Unity import risk; batchmode is not run unless you explicitly set a batchmode command for the task.
+For isolated Unity worktrees, generated `.sln` / `.csproj` files may be copied into the tester worktree and temporarily patched for added or removed `.cs` files only when you explicitly enter a `dotnet build ... .sln` command. These generated files are verification inputs only and are not committed. Prefab, scene, and `.asset` changes are reported as residual Unity import risk.
 
 ## Notion Sync
 

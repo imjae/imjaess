@@ -39,7 +39,6 @@ import type {
   Verification
 } from "@/lib/types";
 import type { ModelOption } from "@/lib/model-catalog";
-import { defaultUnityDotnetVerificationCommand } from "@/lib/verification-command";
 
 type Tab = "agents" | "artifacts" | "shell" | "verifications" | "conventions";
 type UiLanguage = "ko" | "en";
@@ -58,6 +57,7 @@ const UI_TEXT = {
     artifactsTab: "Broker",
     attachments: "Attachments",
     blocked: "Blocked",
+    balancedMode: "Balanced",
     browseFolders: "Browse folders",
     category: "Category",
     close: "Close",
@@ -80,6 +80,8 @@ const UI_TEXT = {
     followUpOfTask: "Follow-up of task",
     followUpPlaceholder: "Ask a follow-up without reusing the full raw task context. A child task will be created.",
     followUpTasks: "Follow-up Tasks",
+    fastMode: "Fast",
+    directMode: "Direct",
     goal: "Goal",
     grantCli: "Grant task-level CLI permission",
     imageLimit: "PNG, JPG, WEBP, GIF up to 12 MB each",
@@ -107,6 +109,11 @@ const UI_TEXT = {
     originalOutput: "Original output",
     parallelTasks: "Parallel Tasks",
     pendingImages: "Images to attach when this task starts",
+    plannerAnswer: "Your answer",
+    plannerQuestionIntro: "Planner is waiting for your answers. Submitting resumes the task; waiting time is not counted against agent time budgets.",
+    plannerQuestionTitle: "Planner Questions",
+    planningMode: "Planning mode",
+    planMode: "Plan",
     previewExport: "Preview Export",
     reason: "Reason",
     reasoningEffort: "Reasoning",
@@ -127,6 +134,7 @@ const UI_TEXT = {
     settings: "Settings",
     serviceTier: "Speed",
     shellTab: "Shell",
+    submitPlannerAnswer: "Submit and Resume",
     syncNotionTasks: "Push Task DB",
     taskDetail: "Task Detail",
     taskGroup: "Task Tag",
@@ -139,6 +147,7 @@ const UI_TEXT = {
     ungrouped: "Untagged",
     uploadImages: "Uploading images...",
     verificationCommand: "Verification command",
+    verificationMode: "Verification mode",
     verificationsTab: "Verifier",
     worktreeCleanup: "Worktree cleanup",
     writeAgents: "Write AGENTS.md"
@@ -303,6 +312,7 @@ function statusLabel(status: Task["status"], language: UiLanguage): string {
       running: "Running",
       reviewing: "Reviewing",
       verifying: "Verifying",
+      waiting_for_user: "Waiting",
       needs_fix: "Needs Fix",
       done: "Done",
       blocked: "Blocked"
@@ -312,6 +322,7 @@ function statusLabel(status: Task["status"], language: UiLanguage): string {
       running: "실행 중",
       reviewing: "리뷰 중",
       verifying: "검증 중",
+      waiting_for_user: "답변 대기",
       needs_fix: "수정 필요",
       done: "완료",
       blocked: "차단됨"
@@ -348,6 +359,21 @@ function buildTaskTree(tasks: Task[]): TaskTreeNode[] {
 
 function taskTagLabel(tag: string, language: UiLanguage): string {
   return tag.trim() || tr(language, "ungrouped");
+}
+
+function verificationModeLabel(mode: Task["verificationMode"], language: UiLanguage): string {
+  return mode === "balanced" ? tr(language, "balancedMode") : tr(language, "fastMode");
+}
+
+function planningModeLabel(mode: Task["planningMode"], language: UiLanguage): string {
+  return mode === "plan" ? tr(language, "planMode") : tr(language, "directMode");
+}
+
+function latestBrokerArtifact(task: TaskDetail | null, kind: BrokerArtifact["kind"]): BrokerArtifact | null {
+  if (!task) {
+    return null;
+  }
+  return task.brokerArtifacts.filter((artifact) => artifact.kind === kind).at(-1) || null;
 }
 
 function normalizeTaskTags(tags: string[]): string[] {
@@ -462,7 +488,7 @@ function localizedAgentOutput(text: string, language: UiLanguage): string {
 }
 
 function canDeleteTask(task: Task): boolean {
-  return task.status === "queued" || task.status === "done" || task.status === "blocked";
+  return task.status === "queued" || task.status === "waiting_for_user" || task.status === "done" || task.status === "blocked";
 }
 
 function activeScopeMention(value: string, cursor: number): ScopeMention | null {
@@ -524,6 +550,7 @@ export default function HomePage(): React.ReactElement {
   const [isSyncingNotionTasks, setSyncingNotionTasks] = useState(false);
   const [isImportingNotionTasks, setImportingNotionTasks] = useState(false);
   const [isUploadingAttachment, setUploadingAttachment] = useState(false);
+  const [isSubmittingPlannerAnswer, setSubmittingPlannerAnswer] = useState(false);
   const [isCleaningWorktrees, setCleaningWorktrees] = useState(false);
   const [isSettingsOpen, setSettingsOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -535,6 +562,7 @@ export default function HomePage(): React.ReactElement {
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
   const [isLoadingSuggestions, setLoadingSuggestions] = useState(false);
   const [followUpMessage, setFollowUpMessage] = useState("");
+  const [plannerAnswer, setPlannerAnswer] = useState("");
   const [isCreatingFollowUp, setCreatingFollowUp] = useState(false);
   const [isFolderBrowserOpen, setFolderBrowserOpen] = useState(false);
   const [isLoadingFolders, setLoadingFolders] = useState(false);
@@ -548,7 +576,9 @@ export default function HomePage(): React.ReactElement {
     goal: "",
     scope: "",
     targetProjectPath: defaultProjectPath,
-    verificationCommand: defaultUnityDotnetVerificationCommand(),
+    verificationCommand: "",
+    planningMode: "direct" as Task["planningMode"],
+    verificationMode: "fast" as Task["verificationMode"],
     agentPlan: "",
     approvalGrant: true
   });
@@ -688,8 +718,9 @@ export default function HomePage(): React.ReactElement {
 
   const metrics = useMemo(() => {
     return {
-      active: tasks.filter((task) => ["queued", "running", "reviewing", "verifying", "needs_fix"].includes(task.status))
-        .length,
+      active: tasks.filter((task) =>
+        ["queued", "running", "reviewing", "verifying", "waiting_for_user", "needs_fix"].includes(task.status)
+      ).length,
       done: tasks.filter((task) => task.status === "done").length,
       blocked: tasks.filter((task) => task.status === "blocked").length,
       notes: notes.length
@@ -1056,6 +1087,28 @@ export default function HomePage(): React.ReactElement {
     await refreshDetail(selectedTaskId);
   }
 
+  async function submitPlannerAnswer(event: FormEvent): Promise<void> {
+    event.preventDefault();
+    if (!taskDetail || !plannerAnswer.trim()) {
+      return;
+    }
+    setSubmittingPlannerAnswer(true);
+    setError(null);
+    try {
+      await jsonFetch(`/api/tasks/${taskDetail.id}/plan-answer`, {
+        method: "POST",
+        body: JSON.stringify({ answer: plannerAnswer })
+      });
+      setPlannerAnswer("");
+      await refreshTasks();
+      await refreshDetail(taskDetail.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSubmittingPlannerAnswer(false);
+    }
+  }
+
   async function deleteSelectedTask(task: Task): Promise<void> {
     if (!canDeleteTask(task)) {
       setError("Running tasks cannot be deleted until they finish or block.");
@@ -1290,6 +1343,8 @@ export default function HomePage(): React.ReactElement {
             <span className="pill">
               {tr(language, "round")} {task.currentRound}
             </span>
+            <span className="pill">{planningModeLabel(task.planningMode, language)}</span>
+            <span className="pill">{verificationModeLabel(task.verificationMode, language)}</span>
             {hasChildren ? <span className="pill follow-up-count">{node.children.length} follow-up</span> : null}
             <span className="spacer" />
             <button
@@ -1314,6 +1369,9 @@ export default function HomePage(): React.ReactElement {
       </Fragment>
     );
   }
+
+  const plannerQuestions = latestBrokerArtifact(taskDetail, "plan_questions");
+  const showPlannerAnswerModal = taskDetail?.status === "waiting_for_user" && Boolean(plannerQuestions);
 
   return (
     <main className="app-shell">
@@ -1508,6 +1566,32 @@ export default function HomePage(): React.ReactElement {
                   onChange={(event) => setTaskForm({ ...taskForm, verificationCommand: event.target.value })}
                 />
               </div>
+              <div className="field">
+                <label htmlFor="planning-mode">{tr(language, "planningMode")}</label>
+                <select
+                  id="planning-mode"
+                  value={taskForm.planningMode}
+                  onChange={(event) =>
+                    setTaskForm({ ...taskForm, planningMode: event.target.value as Task["planningMode"] })
+                  }
+                >
+                  <option value="direct">{tr(language, "directMode")}</option>
+                  <option value="plan">{tr(language, "planMode")}</option>
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="verification-mode">{tr(language, "verificationMode")}</label>
+                <select
+                  id="verification-mode"
+                  value={taskForm.verificationMode}
+                  onChange={(event) =>
+                    setTaskForm({ ...taskForm, verificationMode: event.target.value as Task["verificationMode"] })
+                  }
+                >
+                  <option value="fast">{tr(language, "fastMode")}</option>
+                  <option value="balanced">{tr(language, "balancedMode")}</option>
+                </select>
+              </div>
               <label className="checkbox-row">
                 <input
                   type="checkbox"
@@ -1651,6 +1735,35 @@ export default function HomePage(): React.ReactElement {
           </div>
         </section>
       </section>
+
+      {showPlannerAnswerModal ? (
+        <div className="modal-backdrop" role="presentation">
+          <section aria-modal="true" className="settings-modal planner-modal" role="dialog">
+            <div className="modal-header">
+              <div className="panel-title">
+                <ShieldQuestion size={18} aria-hidden="true" />
+                {tr(language, "plannerQuestionTitle")}
+              </div>
+            </div>
+            <form className="settings-body" onSubmit={(event) => void submitPlannerAnswer(event)}>
+              <div className="notice-line">{tr(language, "plannerQuestionIntro")}</div>
+              <pre className="planner-question-box">{plannerQuestions?.content}</pre>
+              <div className="field">
+                <label htmlFor="planner-answer">{tr(language, "plannerAnswer")}</label>
+                <textarea
+                  id="planner-answer"
+                  value={plannerAnswer}
+                  onChange={(event) => setPlannerAnswer(event.target.value)}
+                />
+              </div>
+              <button className="btn primary" disabled={isSubmittingPlannerAnswer || !plannerAnswer.trim()} type="submit">
+                <Play size={16} aria-hidden="true" />
+                {tr(language, "submitPlannerAnswer")}
+              </button>
+            </form>
+          </section>
+        </div>
+      ) : null}
 
       {isSettingsOpen ? (
         <div className="modal-backdrop" role="presentation" onMouseDown={() => setSettingsOpen(false)}>
@@ -2179,6 +2292,8 @@ function TaskDetailView(props: {
           <GitBranch size={13} aria-hidden="true" />
           {tr(props.language, "round")} {props.task.currentRound}
         </span>
+        <span className="pill">{planningModeLabel(props.task.planningMode, props.language)}</span>
+        <span className="pill">{verificationModeLabel(props.task.verificationMode, props.language)}</span>
       </div>
       <div>
         <h2 style={{ margin: "0 0 6px", fontSize: 18 }}>{props.task.title}</h2>

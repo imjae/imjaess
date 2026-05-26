@@ -34,6 +34,8 @@ function task(input: { id: string; root: string; status: TaskStatus; updatedAt?:
     targetProjectPath: input.root,
     worktreePath: null,
     agentPlan: "",
+    planningMode: "direct",
+    verificationMode: "fast",
     approvalGrant: true,
     status: input.status,
     currentRound: 1,

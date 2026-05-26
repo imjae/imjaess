@@ -19,7 +19,9 @@ import type {
   TaskAttachment,
   TaskDetail,
   TaskGroup,
+  TaskPlanningMode,
   TaskTag,
+  TaskVerificationMode,
   TaskStatus,
   Verification,
   VerificationDecision
@@ -78,6 +80,8 @@ function migrate(database: DatabaseType): void {
       target_project_path TEXT NOT NULL,
       worktree_path TEXT,
       agent_plan TEXT NOT NULL,
+      planning_mode TEXT NOT NULL DEFAULT 'direct',
+      verification_mode TEXT NOT NULL DEFAULT 'fast',
       approval_grant INTEGER NOT NULL,
       status TEXT NOT NULL,
       current_round INTEGER NOT NULL DEFAULT 0,
@@ -284,6 +288,12 @@ function migrate(database: DatabaseType): void {
   if (!taskColumnNames.has("task_group")) {
     database.exec("ALTER TABLE tasks ADD COLUMN task_group TEXT NOT NULL DEFAULT '';");
   }
+  if (!taskColumnNames.has("verification_mode")) {
+    database.exec("ALTER TABLE tasks ADD COLUMN verification_mode TEXT NOT NULL DEFAULT 'balanced';");
+  }
+  if (!taskColumnNames.has("planning_mode")) {
+    database.exec("ALTER TABLE tasks ADD COLUMN planning_mode TEXT NOT NULL DEFAULT 'direct';");
+  }
   database.exec(`
     INSERT OR IGNORE INTO task_groups (name, created_at, updated_at)
     SELECT DISTINCT TRIM(task_group), created_at, updated_at
@@ -320,6 +330,14 @@ function normalizeTaskTags(tags: Array<string | null | undefined>): string[] {
   return normalized;
 }
 
+function normalizeVerificationMode(value: unknown): TaskVerificationMode {
+  return value === "balanced" ? "balanced" : "fast";
+}
+
+function normalizePlanningMode(value: unknown): TaskPlanningMode {
+  return value === "plan" ? "plan" : "direct";
+}
+
 function listTaskTagNamesForTask(taskId: string): string[] {
   return (
     getDb()
@@ -342,6 +360,8 @@ function mapTask(row: Record<string, unknown>): Task {
     targetProjectPath: String(row.target_project_path),
     worktreePath: row.worktree_path ? String(row.worktree_path) : null,
     agentPlan: String(row.agent_plan),
+    planningMode: normalizePlanningMode(row.planning_mode),
+    verificationMode: normalizeVerificationMode(row.verification_mode),
     approvalGrant: boolFromDb(row.approval_grant),
     status: String(row.status) as TaskStatus,
     currentRound: Number(row.current_round),
@@ -503,11 +523,18 @@ export function upsertProject(input: {
     .get(input.path) as Record<string, unknown> | undefined;
   const timestamp = nowIso();
   if (existing) {
+    const shouldUpdateVerificationCommand = Object.prototype.hasOwnProperty.call(input, "verificationCommand");
     database
       .prepare(
-        "UPDATE projects SET name = ?, verification_command = COALESCE(?, verification_command), updated_at = ? WHERE path = ?"
+        "UPDATE projects SET name = ?, verification_command = CASE WHEN ? THEN ? ELSE verification_command END, updated_at = ? WHERE path = ?"
       )
-      .run(input.name || String(existing.name), input.verificationCommand ?? null, timestamp, input.path);
+      .run(
+        input.name || String(existing.name),
+        shouldUpdateVerificationCommand ? 1 : 0,
+        input.verificationCommand ?? null,
+        timestamp,
+        input.path
+      );
     return mapProject(
       database.prepare("SELECT * FROM projects WHERE path = ?").get(input.path) as Record<string, unknown>
     );
@@ -652,6 +679,8 @@ export function createTask(input: {
   scope: string;
   targetProjectPath: string;
   agentPlan: string;
+  planningMode?: TaskPlanningMode;
+  verificationMode?: TaskVerificationMode;
   approvalGrant: boolean;
 }): Task {
   const timestamp = nowIso();
@@ -667,6 +696,8 @@ export function createTask(input: {
     targetProjectPath: input.targetProjectPath,
     worktreePath: null,
     agentPlan: input.agentPlan,
+    planningMode: input.planningMode || "direct",
+    verificationMode: input.verificationMode || "fast",
     approvalGrant: input.approvalGrant,
     status: "queued",
     currentRound: 0,
@@ -679,8 +710,8 @@ export function createTask(input: {
     database
       .prepare(
         `INSERT INTO tasks
-        (id, parent_task_id, task_group, title, goal, scope, target_project_path, worktree_path, agent_plan, approval_grant, status, current_round, failure_reason, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        (id, parent_task_id, task_group, title, goal, scope, target_project_path, worktree_path, agent_plan, planning_mode, verification_mode, approval_grant, status, current_round, failure_reason, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         task.id,
@@ -692,6 +723,8 @@ export function createTask(input: {
         task.targetProjectPath,
         task.worktreePath,
         task.agentPlan,
+        task.planningMode,
+        task.verificationMode,
         task.approvalGrant ? 1 : 0,
         task.status,
         task.currentRound,
@@ -720,6 +753,8 @@ export function upsertImportedTask(input: {
   targetProjectPath: string;
   worktreePath?: string | null;
   agentPlan: string;
+  planningMode?: TaskPlanningMode;
+  verificationMode?: TaskVerificationMode;
   approvalGrant: boolean;
   status: TaskStatus;
   currentRound: number;
@@ -745,6 +780,8 @@ export function upsertImportedTask(input: {
     targetProjectPath: input.targetProjectPath,
     worktreePath: input.worktreePath || null,
     agentPlan: input.agentPlan,
+    planningMode: input.planningMode || existing?.planningMode || "direct",
+    verificationMode: input.verificationMode || existing?.verificationMode || "fast",
     approvalGrant: input.approvalGrant,
     status: input.status,
     currentRound: input.currentRound,
@@ -757,8 +794,8 @@ export function upsertImportedTask(input: {
     database
       .prepare(
         `INSERT INTO tasks
-        (id, parent_task_id, task_group, title, goal, scope, target_project_path, worktree_path, agent_plan, approval_grant, status, current_round, failure_reason, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, parent_task_id, task_group, title, goal, scope, target_project_path, worktree_path, agent_plan, planning_mode, verification_mode, approval_grant, status, current_round, failure_reason, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           parent_task_id = excluded.parent_task_id,
           task_group = excluded.task_group,
@@ -768,6 +805,8 @@ export function upsertImportedTask(input: {
           target_project_path = excluded.target_project_path,
           worktree_path = excluded.worktree_path,
           agent_plan = excluded.agent_plan,
+          planning_mode = excluded.planning_mode,
+          verification_mode = excluded.verification_mode,
           approval_grant = excluded.approval_grant,
           status = excluded.status,
           current_round = excluded.current_round,
@@ -784,6 +823,8 @@ export function upsertImportedTask(input: {
         task.targetProjectPath,
         task.worktreePath,
         task.agentPlan,
+        task.planningMode,
+        task.verificationMode,
         task.approvalGrant ? 1 : 0,
         task.status,
         task.currentRound,
@@ -1193,6 +1234,19 @@ export function insertBrokerArtifact(input: {
       artifact.createdAt
     );
   return artifact;
+}
+
+export function getBrokerArtifact(
+  taskId: string,
+  round: number,
+  kind: BrokerArtifact["kind"]
+): BrokerArtifact | null {
+  const row = getDb()
+    .prepare(
+      "SELECT * FROM broker_artifacts WHERE task_id = ? AND round = ? AND kind = ? ORDER BY created_at DESC LIMIT 1"
+    )
+    .get(taskId, round, kind) as Record<string, unknown> | undefined;
+  return row ? mapBrokerArtifact(row) : null;
 }
 
 export function createConventionNote(input: Omit<ConventionNote, "id" | "createdAt" | "updatedAt">): ConventionNote {

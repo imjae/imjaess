@@ -93,6 +93,16 @@ function mockAgent(input: AgentInput): string {
       "No implementation changes were made in mock mode."
     ].join("\n");
   }
+  if (input.role === "planner") {
+    return [
+      `Mock planner round ${input.round} completed.`,
+      "Questions:",
+      "1. What constraints should the implementer preserve?",
+      "2. Which verification evidence matters most?",
+      "",
+      "Draft plan: answer the questions, then implement only the scoped change."
+    ].join("\n");
+  }
   if (input.role === "tester") {
     return "Mock tester: no blocking issues found from the broker test brief. Continue to verifier.";
   }
@@ -349,7 +359,7 @@ async function runCodexCliAgent(input: AgentInput): Promise<string> {
   const prompt = [
     buildInstructions(input),
     "You are running through Codex CLI. Treat the approved task worktree as your only writable workspace.",
-    input.role === "researcher" || input.role === "tester" || input.role === "verifier"
+    input.role === "researcher" || input.role === "planner" || input.role === "tester" || input.role === "verifier"
       ? "Do not modify files unless the role prompt explicitly requires it."
       : "",
     input.attachmentPaths?.length

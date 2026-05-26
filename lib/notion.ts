@@ -11,10 +11,21 @@ import {
   upsertNotionSync
 } from "@/lib/db";
 import { taskReportMarkdown, type TaskReportLanguage } from "@/lib/task-report";
-import type { Task, TaskStatus } from "@/lib/types";
+import type { Task, TaskPlanningMode, TaskStatus, TaskVerificationMode } from "@/lib/types";
 
 const TASK_DATABASE_TITLE = "Oh My Codex Tasks";
-const TASK_STATUSES: TaskStatus[] = ["queued", "running", "reviewing", "verifying", "needs_fix", "done", "blocked"];
+const TASK_STATUSES: TaskStatus[] = [
+  "queued",
+  "running",
+  "reviewing",
+  "verifying",
+  "waiting_for_user",
+  "needs_fix",
+  "done",
+  "blocked"
+];
+const TASK_PLANNING_MODES: TaskPlanningMode[] = ["direct", "plan"];
+const TASK_VERIFICATION_MODES: TaskVerificationMode[] = ["fast", "balanced"];
 
 type NotionPage = {
   id: string;
@@ -36,6 +47,8 @@ type ImportedTask = {
   targetProjectPath: string;
   worktreePath: string | null;
   agentPlan: string;
+  planningMode: TaskPlanningMode;
+  verificationMode: TaskVerificationMode;
   approvalGrant: boolean;
   status: TaskStatus;
   currentRound: number;
@@ -115,6 +128,16 @@ function taskDatabaseProperties(): Record<string, unknown> {
     "Target Project Path": { rich_text: {} },
     "Worktree Path": { rich_text: {} },
     "Agent Plan": { rich_text: {} },
+    "Planning Mode": {
+      select: {
+        options: TASK_PLANNING_MODES.map((name) => ({ name }))
+      }
+    },
+    "Verification Mode": {
+      select: {
+        options: TASK_VERIFICATION_MODES.map((name) => ({ name }))
+      }
+    },
     "Approval Grant": { checkbox: {} },
     "Current Round": { number: { format: "number" } },
     "Failure Reason": { rich_text: {} },
@@ -137,6 +160,8 @@ function taskPageProperties(task: Task): Record<string, unknown> {
     "Target Project Path": richTextProperty(task.targetProjectPath),
     "Worktree Path": richTextProperty(task.worktreePath || ""),
     "Agent Plan": richTextProperty(task.agentPlan),
+    "Planning Mode": selectProperty(task.planningMode),
+    "Verification Mode": selectProperty(task.verificationMode),
     "Approval Grant": { checkbox: task.approvalGrant },
     "Current Round": { number: task.currentRound },
     "Failure Reason": richTextProperty(task.failureReason || ""),
@@ -144,6 +169,13 @@ function taskPageProperties(task: Task): Record<string, unknown> {
     "Updated At": dateProperty(task.updatedAt),
     "Verification Command": richTextProperty(verificationCommand)
   };
+}
+
+async function ensureTaskDataSourceSchema(client: Client, dataSourceId: string): Promise<void> {
+  await client.dataSources.update({
+    data_source_id: dataSourceId,
+    properties: taskDatabaseProperties()
+  } as never);
 }
 
 function property(properties: Record<string, unknown> | undefined, name: string): Record<string, unknown> {
@@ -324,6 +356,7 @@ async function ensureTaskDataSource(client: Client): Promise<{ databaseId: strin
         client.dataSources.retrieve({ data_source_id: settings.dataSourceId })
       ]);
       if (!isArchivedNotionObject(database) && !isArchivedNotionObject(dataSource)) {
+        await ensureTaskDataSourceSchema(client, settings.dataSourceId);
         return { databaseId: settings.databaseId, dataSourceId: settings.dataSourceId };
       }
     } catch {
@@ -338,6 +371,7 @@ async function ensureTaskDataSource(client: Client): Promise<{ databaseId: strin
     if (!isArchivedNotionObject(database) && dataSourceId) {
       const dataSource = await client.dataSources.retrieve({ data_source_id: dataSourceId });
       if (!isArchivedNotionObject(dataSource)) {
+        await ensureTaskDataSourceSchema(client, dataSourceId);
         updateNotionSettings({
           parentPageId: settings.parentPageId,
           databaseId: discoveredDatabaseId,
@@ -404,6 +438,8 @@ function pageToImportedTask(page: NotionPage): ImportedTask | null {
   }
   const status = selectValue(props, "Status") as TaskStatus;
   const safeStatus = TASK_STATUSES.includes(status) ? status : "queued";
+  const planningMode = selectValue(props, "Planning Mode") as TaskPlanningMode;
+  const verificationMode = selectValue(props, "Verification Mode") as TaskVerificationMode;
   return {
     id,
     parentTaskId: richTextValue(props, "Parent Task ID").trim() || null,
@@ -414,6 +450,8 @@ function pageToImportedTask(page: NotionPage): ImportedTask | null {
     targetProjectPath: richTextValue(props, "Target Project Path"),
     worktreePath: richTextValue(props, "Worktree Path") || null,
     agentPlan: richTextValue(props, "Agent Plan"),
+    planningMode: TASK_PLANNING_MODES.includes(planningMode) ? planningMode : "direct",
+    verificationMode: TASK_VERIFICATION_MODES.includes(verificationMode) ? verificationMode : "fast",
     approvalGrant: checkboxValue(props, "Approval Grant"),
     status: safeStatus,
     currentRound: numberValue(props, "Current Round"),

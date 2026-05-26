@@ -40,7 +40,7 @@ export function createFollowUpTask(input: {
   );
   upsertProject({
     path: targetProjectPath,
-    verificationCommand
+    verificationCommand: verificationCommand || null
   });
 
   const task = createTask({
@@ -55,7 +55,9 @@ export function createFollowUpTask(input: {
     scope: parent.scope,
     targetProjectPath,
     agentPlan:
-      "Follow-up task: use the parent task summary as background, verify repository state, then run isolated researcher/implementer/tester/verifier roles.",
+      "Follow-up task: use the parent task summary as background, verify repository state, then run isolated researcher/implementer/verifier roles.",
+    planningMode: parent.planningMode,
+    verificationMode: parent.verificationMode,
     approvalGrant: input.approvalGrant
   });
 

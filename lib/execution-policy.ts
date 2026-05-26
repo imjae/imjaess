@@ -15,8 +15,8 @@ export interface ManagedPrompt {
 
 export function executionPolicy(role?: AgentRole): ExecutionPolicy {
   return {
-    contextBudgetChars: positiveInt(process.env.AGENT_CONTEXT_BUDGET_CHARS, 12_000),
-    outputBudgetChars: positiveInt(process.env.AGENT_OUTPUT_BUDGET_CHARS, 4_000),
+    contextBudgetChars: positiveInt(process.env.AGENT_CONTEXT_BUDGET_CHARS, 30_000),
+    outputBudgetChars: positiveInt(process.env.AGENT_OUTPUT_BUDGET_CHARS, 8_000),
     timeBudgetMs:
       role === "implementer"
         ? positiveInt(process.env.IMPLEMENTER_TIME_BUDGET_MS, 900_000)
@@ -59,6 +59,9 @@ export function buildManagedPrompt(input: {
     "- End with a HANDOFF SUMMARY section: result, evidence, remaining risks, next action.",
     input.role === "researcher"
       ? "- Produce facts, paths, commands, and evidence only. Do not propose implementation code unless asked."
+      : "",
+    input.role === "planner"
+      ? "- Turn evidence into concise questions and an implementation plan. Do not edit files."
       : "",
     input.role === "implementer"
       ? "- Implement from the broker-provided evidence only. Do not assume hidden tester behavior."
