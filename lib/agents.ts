@@ -80,6 +80,23 @@ function extractFunctionCalls(response: unknown): Array<{ call_id: string; name:
 
 function mockAgent(input: AgentInput): string {
   if (input.role === "researcher") {
+    if (input.prompt.includes("<<PLAN_QUESTIONS>>")) {
+      return [
+        "<<EVIDENCE_PACK>>",
+        `Mock researcher 라운드 ${input.round} 조사 완료.`,
+        "근거: target project는 mock 모드에서 접근 가능합니다.",
+        "위험: 실제 저장소 사실 확인에는 MOCK_AGENTS=0 및 shell 검사가 필요합니다.",
+        "<</EVIDENCE_PACK>>",
+        "",
+        "<<PLAN_QUESTIONS>>",
+        "질문:",
+        "1. 구현자가 반드시 유지해야 할 제약은 무엇인가요?",
+        "2. 가장 중요하게 봐야 할 검증 근거는 무엇인가요?",
+        "",
+        "임시 구현 계획: 사용자 답변을 받은 뒤 확인된 근거와 범위에 맞춰 구현합니다.",
+        "<</PLAN_QUESTIONS>>"
+      ].join("\n");
+    }
     return [
       `Mock researcher round ${input.round} completed.`,
       "Evidence: target project is reachable in mock mode.",

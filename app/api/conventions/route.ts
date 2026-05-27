@@ -6,6 +6,7 @@ export const dynamic = "force-dynamic";
 
 const noteSchema = z.object({
   projectPath: z.string().min(1),
+  ruleTarget: z.enum(["research_planning", "implementation"]).default("implementation"),
   category: z.string().min(1),
   rule: z.string().min(1),
   reason: z.string().default(""),

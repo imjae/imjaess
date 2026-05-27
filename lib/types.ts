@@ -171,6 +171,7 @@ export interface Verification {
 export interface ConventionNote {
   id: string;
   projectPath: string;
+  ruleTarget: "research_planning" | "implementation";
   category: string;
   rule: string;
   reason: string;

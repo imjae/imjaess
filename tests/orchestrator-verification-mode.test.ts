@@ -3,7 +3,14 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createTask, getTaskDetail, insertBrokerArtifact, resetDbForTests, upsertProject } from "@/lib/db";
+import {
+  createConventionNote,
+  createTask,
+  getTaskDetail,
+  insertBrokerArtifact,
+  resetDbForTests,
+  upsertProject
+} from "@/lib/db";
 import { processTask } from "@/lib/orchestrator";
 
 function createGitRepo(): string {
@@ -97,6 +104,49 @@ describe("orchestrator verification modes", () => {
     expect(detail?.verifications[0]?.command).toBe("Write-Output ok");
   });
 
+  it("applies research/planning and implementation rules to the matching agents", async () => {
+    const root = createGitRepo();
+    createConventionNote({
+      projectPath: root,
+      ruleTarget: "research_planning",
+      category: "Agent flow",
+      rule: "계획 전에 실제 코드 흐름을 먼저 확인한다.",
+      reason: "",
+      source: "manual",
+      confidence: "high",
+      examples: ""
+    });
+    createConventionNote({
+      projectPath: root,
+      ruleTarget: "implementation",
+      category: "Code",
+      rule: "구현 변경은 확인된 파일로 좁게 제한한다.",
+      reason: "",
+      source: "manual",
+      confidence: "high",
+      examples: ""
+    });
+    const task = createTask({
+      title: "Rule-guided task",
+      goal: "Apply rules",
+      scope: "",
+      targetProjectPath: root,
+      agentPlan: "Plan",
+      verificationMode: "fast",
+      approvalGrant: true
+    });
+
+    await processTask(task.id);
+
+    const detail = getTaskDetail(task.id);
+    expect(detail?.agentRuns.find((run) => run.role === "researcher")?.input).toContain(
+      "계획 전에 실제 코드 흐름을 먼저 확인한다."
+    );
+    expect(detail?.agentRuns.find((run) => run.role === "implementer")?.input).toContain(
+      "구현 변경은 확인된 파일로 좁게 제한한다."
+    );
+  });
+
   it("pauses plan-mode tasks for user answers before implementation", async () => {
     const root = createGitRepo();
     const task = createTask({
@@ -115,8 +165,9 @@ describe("orchestrator verification modes", () => {
     const detail = getTaskDetail(task.id);
     const plannerQuestions = detail?.brokerArtifacts.find((artifact) => artifact.kind === "plan_questions");
     expect(detail?.status).toBe("waiting_for_user");
-    expect(detail?.agentRuns.map((run) => run.role)).toEqual(["researcher", "planner"]);
-    expect(plannerQuestions?.content).toContain("브로커 Planner 질문");
+    expect(detail?.agentRuns.map((run) => run.role)).toEqual(["researcher"]);
+    expect(plannerQuestions?.sourceRole).toBe("researcher");
+    expect(plannerQuestions?.content).toContain("브로커 조사/계획 질문");
     expect(plannerQuestions?.content).toContain("질문:");
     expect(detail?.agentRuns.some((run) => run.role === "implementer")).toBe(false);
   });
@@ -147,7 +198,7 @@ describe("orchestrator verification modes", () => {
     const detail = getTaskDetail(task.id);
     const planBrief = detail?.brokerArtifacts.find((artifact) => artifact.kind === "plan_brief");
     expect(detail?.status).toBe("done");
-    expect(detail?.agentRuns.map((run) => run.role)).toEqual(["researcher", "planner", "implementer", "verifier"]);
+    expect(detail?.agentRuns.map((run) => run.role)).toEqual(["researcher", "implementer", "verifier"]);
     expect(planBrief?.content).toContain("브로커 구현 계획 요약");
     expect(planBrief?.content).toContain("사용자 답변:");
   });

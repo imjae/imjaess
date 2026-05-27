@@ -9,6 +9,7 @@ import {
   getTask,
   insertBrokerArtifact,
   insertVerification,
+  listConventionNotes,
   listTaskAttachments,
   updateTask,
   upsertProject
@@ -78,6 +79,49 @@ function taskBrief(task: Task, round: number, brokerBrief: string, scopeReferenc
   ]
     .filter(Boolean)
     .join("\n\n");
+}
+
+function conventionRuleBrief(projectPath: string, ruleTarget: "research_planning" | "implementation"): string {
+  const notes = listConventionNotes(path.resolve(projectPath)).filter((note) => note.ruleTarget === ruleTarget);
+  if (notes.length === 0) {
+    return "";
+  }
+  const title =
+    ruleTarget === "research_planning"
+      ? "Research and planning rules for this project"
+      : "Implementation rules for this project";
+  return [
+    title,
+    ...notes.map((note, index) =>
+      [
+        `${index + 1}. [${note.category} / ${note.confidence}] ${note.rule}`,
+        note.reason ? `   Reason: ${note.reason}` : "",
+        note.examples ? `   Examples: ${note.examples}` : ""
+      ]
+        .filter(Boolean)
+        .join("\n")
+    )
+  ].join("\n");
+}
+
+function extractTaggedSection(text: string, tag: "EVIDENCE_PACK" | "PLAN_QUESTIONS"): string {
+  const pattern = new RegExp(`<<${tag}>>([\\s\\S]*?)<</${tag}>>`, "i");
+  return text.match(pattern)?.[1]?.trim() || "";
+}
+
+function splitResearchPlanningOutput(output: string): { evidence: string; planQuestions: string } {
+  const evidence = extractTaggedSection(output, "EVIDENCE_PACK");
+  const planQuestions = extractTaggedSection(output, "PLAN_QUESTIONS");
+  if (evidence || planQuestions) {
+    return {
+      evidence: evidence || output.trim(),
+      planQuestions: planQuestions || output.trim()
+    };
+  }
+  return {
+    evidence: output.trim(),
+    planQuestions: output.trim()
+  };
 }
 
 function brokerArtifact(input: {
@@ -221,6 +265,13 @@ export async function processTask(taskId: string, signal?: AbortSignal): Promise
       updateTask(taskId, { status: "running", currentRound: round });
       const refreshedTask = getTask(taskId) || task;
       const existingEvidencePack = getBrokerArtifact(taskId, round, "evidence_pack");
+      const isPlanModeFirstRound = refreshedTask.planningMode === "plan" && round === 1;
+      const existingPlanBrief = isPlanModeFirstRound ? getBrokerArtifact(taskId, round, "plan_brief") : null;
+      const existingPlanQuestions = isPlanModeFirstRound ? getBrokerArtifact(taskId, round, "plan_questions") : null;
+      const planAnswer = isPlanModeFirstRound ? getBrokerArtifact(taskId, round, "plan_answer") : null;
+      let planQuestions = existingPlanQuestions?.content || "";
+      const researchPlanningRules = conventionRuleBrief(projectPath, "research_planning");
+      const implementationRules = conventionRuleBrief(projectPath, "implementation");
       const researcherWorkspace =
         existingEvidencePack || implementationBaseRef === "HEAD"
           ? {
@@ -239,15 +290,38 @@ export async function processTask(taskId: string, signal?: AbortSignal): Promise
       const scopeReferenceContext = await buildScopeReferenceContext(task.scope, researcherWorkspace.path);
       let evidencePack = existingEvidencePack?.content || "";
       if (!evidencePack) {
-        const researcherPrompt = [
-          taskBrief(refreshedTask, round, brokerBrief, scopeReferenceContext),
-          `Your assigned workspace: ${researcherWorkspace.path}`,
-          researcherWorkspace.branchName ? `Your branch: ${researcherWorkspace.branchName}` : "",
-          "Collect only the facts needed for this task: relevant files, likely entry points, constraints, commands, and risks.",
-          "Do not implement. Do not review another agent. End with evidence that the broker can pass to an implementer."
-        ]
-          .filter(Boolean)
-          .join("\n\n");
+        const shouldCombineResearchAndPlanning = isPlanModeFirstRound && !existingPlanBrief && !planAnswer && !planQuestions;
+        const researcherPrompt = shouldCombineResearchAndPlanning
+          ? [
+              taskBrief(refreshedTask, round, brokerBrief, scopeReferenceContext),
+              `Your assigned workspace: ${researcherWorkspace.path}`,
+              researcherWorkspace.branchName ? `Your branch: ${researcherWorkspace.branchName}` : "",
+              researchPlanningRules ? `Apply these research/planning rules:\n${researchPlanningRules}` : "",
+              "Plan mode uses one combined researcher/planner pass. First verify concrete repository evidence, then prepare only the user questions needed before implementation.",
+              "Do not implement and do not test.",
+              "Code-confirmable facts must be investigated directly instead of asked as questions.",
+              "Limit questions to decisions that block implementation. Prefer at most 3 questions.",
+              "Write the planner-facing content in Korean. Keep code identifiers, file paths, commands, branch names, and API names unchanged.",
+              "Return exactly these tagged sections:",
+              "<<EVIDENCE_PACK>>",
+              "관련 파일, 실제 동작 흐름, 수정 후보, 제약, 확인한 명령/근거, 확인하지 못한 부분을 compact하게 정리합니다.",
+              "<</EVIDENCE_PACK>>",
+              "<<PLAN_QUESTIONS>>",
+              "질문과 임시 구현 계획을 한국어로 정리합니다.",
+              "<</PLAN_QUESTIONS>>"
+            ]
+              .filter(Boolean)
+              .join("\n\n")
+          : [
+              taskBrief(refreshedTask, round, brokerBrief, scopeReferenceContext),
+              `Your assigned workspace: ${researcherWorkspace.path}`,
+              researcherWorkspace.branchName ? `Your branch: ${researcherWorkspace.branchName}` : "",
+              researchPlanningRules ? `Apply these research/planning rules:\n${researchPlanningRules}` : "",
+              "Collect only the facts needed for this task: relevant files, likely entry points, constraints, commands, and risks.",
+              "Do not implement. Do not review another agent. End with evidence that the broker can pass to an implementer."
+            ]
+              .filter(Boolean)
+              .join("\n\n");
         const researcherOutput = await runRole({
           task: refreshedTask,
           role: "researcher",
@@ -257,6 +331,7 @@ export async function processTask(taskId: string, signal?: AbortSignal): Promise
           branchName: researcherWorkspace.branchName,
           signal
         });
+        const researchPlanningOutput = splitResearchPlanningOutput(researcherOutput);
         evidencePack = brokerArtifact({
           taskId,
           round,
@@ -265,52 +340,41 @@ export async function processTask(taskId: string, signal?: AbortSignal): Promise
           content: [
             "BROKER EVIDENCE PACK",
             "This is the only researcher output visible to the implementer.",
-            researcherOutput
+            researchPlanningOutput.evidence
           ].join("\n\n")
         });
+        if (shouldCombineResearchAndPlanning) {
+          planQuestions = brokerArtifact({
+            taskId,
+            round,
+            sourceRole: "researcher",
+            kind: "plan_questions",
+            content: [
+              "브로커 조사/계획 질문",
+              "Task가 사용자 답변을 기다리고 있습니다. 사용자 대기 시간은 agent 시간 예산에 포함하지 않습니다.",
+              researchPlanningOutput.planQuestions
+            ].join("\n\n")
+          });
+        }
       }
 
       let planBrief = "";
-      if (refreshedTask.planningMode === "plan" && round === 1) {
-        const existingPlanBrief = getBrokerArtifact(taskId, round, "plan_brief");
+      if (isPlanModeFirstRound) {
         planBrief = existingPlanBrief?.content || "";
         if (!planBrief) {
-          const existingPlanQuestions = getBrokerArtifact(taskId, round, "plan_questions");
-          const planAnswer = getBrokerArtifact(taskId, round, "plan_answer");
           if (!planAnswer) {
             updateTask(taskId, { status: "reviewing" });
-            if (!existingPlanQuestions) {
-              const plannerOutput = await runRole({
-                task: refreshedTask,
-                role: "planner",
-                round,
-                prompt: [
-                  taskBrief(refreshedTask, round, brokerBrief, scopeReferenceContext),
-                  `Your assigned planner workspace: ${researcherWorkspace.path}`,
-                  "Use only the broker evidence pack and task brief.",
-                  `Broker evidence pack:\n${evidencePack}`,
-                  "Write the planner response in Korean.",
-                  "Ask the user only the questions required before implementation. Prefer 2-5 concrete questions, written in Korean.",
-                  "Also include a short Korean draft implementation plan that can be revised after the user's answer.",
-                  "Use Korean headings such as `질문`, `임시 구현 계획`, and `핸드오프 요약`.",
-                  "Keep code identifiers, file paths, commands, branch names, and API names unchanged.",
-                  "Do not implement and do not test."
-                ]
-                  .filter(Boolean)
-                  .join("\n\n"),
-                workspacePath: researcherWorkspace.path,
-                branchName: researcherWorkspace.branchName,
-                signal
-              });
-              brokerArtifact({
+            if (!planQuestions) {
+              planQuestions = brokerArtifact({
                 taskId,
                 round,
-                sourceRole: "planner",
+                sourceRole: "broker",
                 kind: "plan_questions",
                 content: [
-                  "브로커 Planner 질문",
+                  "브로커 조사/계획 질문",
                   "Task가 사용자 답변을 기다리고 있습니다. 사용자 대기 시간은 agent 시간 예산에 포함하지 않습니다.",
-                  plannerOutput
+                  "조사/계획 산출물이 질문 섹션을 분리하지 못했습니다. Evidence pack을 검토한 뒤 사용자 답변을 제출해 주세요.",
+                  evidencePack
                 ].join("\n\n")
               });
             }
@@ -329,7 +393,7 @@ export async function processTask(taskId: string, signal?: AbortSignal): Promise
             content: [
               "브로커 구현 계획 요약",
               "이 내용은 implementer에게 전달되는 유일한 planning handoff입니다.",
-              existingPlanQuestions ? `Planner 질문 및 임시 구현 계획:\n${existingPlanQuestions.content}` : "",
+              planQuestions ? `조사/계획 질문 및 임시 구현 계획:\n${planQuestions}` : "",
               `사용자 답변:\n${planAnswer.content}`
             ].join("\n\n")
           });
@@ -354,6 +418,7 @@ export async function processTask(taskId: string, signal?: AbortSignal): Promise
         implementerWorkspace.branchName ? `Your branch: ${implementerWorkspace.branchName}` : "",
         `Broker evidence pack:\n${evidencePack}`,
         planBrief ? `Broker plan brief:\n${planBrief}` : "",
+        implementationRules ? `Apply these implementation rules:\n${implementationRules}` : "",
         "Implement only from the broker evidence pack, approved plan brief when present, and the task brief.",
         "Do not speculate about tester behavior. End with a concise private handoff summary for the broker."
       ]

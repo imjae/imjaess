@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createTask,
+  createConventionNote,
   deleteTask,
   deleteTaskTag,
   getProjectByPath,
@@ -13,6 +14,7 @@ import {
   insertShellLog,
   insertTaskAttachment,
   listTaskAttachments,
+  listConventionNotes,
   listTaskGroups,
   listTaskTags,
   replaceTaskTags,
@@ -96,6 +98,34 @@ describe("task persistence", () => {
     });
 
     expect(getTaskDetail(task.id)?.planningMode).toBe("plan");
+  });
+
+  it("stores convention notes by rule target", () => {
+    createConventionNote({
+      projectPath: "C:\\repo",
+      ruleTarget: "research_planning",
+      category: "Agent flow",
+      rule: "조사 근거를 먼저 확인한다.",
+      reason: "계획 편향을 줄이기 위해서다.",
+      source: "manual",
+      confidence: "high",
+      examples: ""
+    });
+    createConventionNote({
+      projectPath: "C:\\repo",
+      ruleTarget: "implementation",
+      category: "Code",
+      rule: "변경 범위를 좁게 유지한다.",
+      reason: "",
+      source: "manual",
+      confidence: "medium",
+      examples: ""
+    });
+
+    expect(listConventionNotes("C:\\repo").map((note) => note.ruleTarget)).toEqual([
+      "implementation",
+      "research_planning"
+    ]);
   });
 
   it("can clear a saved project verification command", () => {

@@ -66,7 +66,7 @@ const UI_TEXT = {
     close: "Close",
     confidence: "Confidence",
     conventionNotes: "Convention notes",
-    conventionsTab: "Unity Rules",
+    conventionsTab: "Rules",
     createAndQueue: "Create and Queue",
     createFollowUpTask: "Create Follow-up Task",
     cleanupAllWorktrees: "Cleanup all inactive worktrees",
@@ -103,7 +103,7 @@ const UI_TEXT = {
     noAgentRuns: "No agent runs recorded yet.",
     noTasksInGroup: "No tasks match these tags.",
     noTasksYet: "No tasks yet.",
-    noUnityNotes: "No Unity convention notes for this project.",
+    noUnityNotes: "No rules recorded for this project.",
     noVerifierDecisions: "No verifier decisions yet.",
     notionParentPageId: "Parent page ID",
     notionPlaceholder: "Notion page ID to create task pages under",
@@ -126,6 +126,9 @@ const UI_TEXT = {
     refreshTasks: "Refresh tasks",
     round: "Round",
     rule: "Rule",
+    ruleTarget: "Rule target",
+    researchPlanningRule: "Research / planning",
+    implementationRule: "Implementation",
     run: "Run",
     saveNotionSettings: "Save Notion Settings",
     saveSettings: "Save Settings",
@@ -184,7 +187,7 @@ const UI_TEXT = {
     close: "닫기",
     confidence: "신뢰도",
     conventionNotes: "컨벤션 노트",
-    conventionsTab: "Unity 규칙",
+    conventionsTab: "작업 규칙",
     createAndQueue: "생성하고 대기열에 추가",
     createFollowUpTask: "후속 Task 생성",
     cleanupAllWorktrees: "비활성 worktree 전체 정리",
@@ -218,7 +221,7 @@ const UI_TEXT = {
     noAgentRuns: "아직 agent 실행 기록이 없습니다.",
     noTasksInGroup: "선택한 태그와 일치하는 Task가 없습니다.",
     noTasksYet: "아직 Task가 없습니다.",
-    noUnityNotes: "이 프로젝트의 Unity 컨벤션 노트가 없습니다.",
+    noUnityNotes: "이 프로젝트에 기록된 규칙이 없습니다.",
     noVerifierDecisions: "아직 verifier 판정이 없습니다.",
     notionParentPageId: "상위 페이지 ID",
     notionPlaceholder: "Task 페이지를 생성할 Notion 페이지 ID",
@@ -234,6 +237,9 @@ const UI_TEXT = {
     refreshTasks: "Task 새로고침",
     round: "라운드",
     rule: "규칙",
+    ruleTarget: "규칙 대상",
+    researchPlanningRule: "조사 / 계획",
+    implementationRule: "구현",
     run: "실행",
     saveNotionSettings: "Notion 설정 저장",
     saveSettings: "설정 저장",
@@ -635,6 +641,10 @@ function confidenceLabel(confidence: ConventionNote["confidence"], language: UiL
   return labels[language][confidence];
 }
 
+function ruleTargetLabel(ruleTarget: ConventionNote["ruleTarget"], language: UiLanguage): string {
+  return ruleTarget === "research_planning" ? tr(language, "researchPlanningRule") : tr(language, "implementationRule");
+}
+
 function tabLabels(language: UiLanguage): Array<{ id: Tab; label: string; icon: React.ReactElement }> {
   return [
     { id: "agents", label: tr(language, "agentsTab"), icon: <Database size={15} aria-hidden="true" /> },
@@ -835,6 +845,7 @@ export default function HomePage(): React.ReactElement {
 
   const [noteForm, setNoteForm] = useState({
     projectPath: defaultProjectPath,
+    ruleTarget: "research_planning" as ConventionNote["ruleTarget"],
     category: "Unity C#",
     rule: "",
     reason: "",
@@ -2652,6 +2663,7 @@ function TaskDetailView(props: {
   notes: ConventionNote[];
   noteForm: {
     projectPath: string;
+    ruleTarget: ConventionNote["ruleTarget"];
     category: string;
     rule: string;
     reason: string;
@@ -2661,6 +2673,7 @@ function TaskDetailView(props: {
   };
   setNoteForm: React.Dispatch<React.SetStateAction<{
     projectPath: string;
+    ruleTarget: ConventionNote["ruleTarget"];
     category: string;
     rule: string;
     reason: string;
@@ -3135,6 +3148,7 @@ function ConventionPanel(props: {
   notes: ConventionNote[];
   form: {
     projectPath: string;
+    ruleTarget: ConventionNote["ruleTarget"];
     category: string;
     rule: string;
     reason: string;
@@ -3144,6 +3158,7 @@ function ConventionPanel(props: {
   };
   setForm: React.Dispatch<React.SetStateAction<{
     projectPath: string;
+    ruleTarget: ConventionNote["ruleTarget"];
     category: string;
     rule: string;
     reason: string;
@@ -3170,6 +3185,22 @@ function ConventionPanel(props: {
                 : "Example: Keep gameplay IDs separate from localized display text."
             }
           />
+        </div>
+        <div className="field">
+          <label htmlFor="note-rule-target">{tr(props.language, "ruleTarget")}</label>
+          <select
+            id="note-rule-target"
+            value={props.form.ruleTarget}
+            onChange={(event) =>
+              props.setForm((current) => ({
+                ...current,
+                ruleTarget: event.target.value as ConventionNote["ruleTarget"]
+              }))
+            }
+          >
+            <option value="research_planning">{tr(props.language, "researchPlanningRule")}</option>
+            <option value="implementation">{tr(props.language, "implementationRule")}</option>
+          </select>
         </div>
         <div className="split">
           <div className="field">
@@ -3238,7 +3269,7 @@ function ConventionPanel(props: {
             <div className="log-entry" key={note.id}>
               <header>
                 <span>
-                  {note.category} / {note.confidence}
+                  {ruleTargetLabel(note.ruleTarget, props.language)} / {note.category} / {note.confidence}
                 </span>
                 <span>{note.source}</span>
               </header>

@@ -222,6 +222,7 @@ function migrate(database: DatabaseType): void {
     CREATE TABLE IF NOT EXISTS convention_notes (
       id TEXT PRIMARY KEY,
       project_path TEXT NOT NULL,
+      rule_target TEXT NOT NULL DEFAULT 'implementation',
       category TEXT NOT NULL,
       rule TEXT NOT NULL,
       reason TEXT NOT NULL,
@@ -235,6 +236,10 @@ function migrate(database: DatabaseType): void {
   const agentRunColumns = database.prepare("PRAGMA table_info(agent_runs)").all() as Array<{ name: string }>;
   if (!agentRunColumns.some((column) => column.name === "provider")) {
     database.exec("ALTER TABLE agent_runs ADD COLUMN provider TEXT NOT NULL DEFAULT 'openai';");
+  }
+  const conventionNoteColumns = database.prepare("PRAGMA table_info(convention_notes)").all() as Array<{ name: string }>;
+  if (!conventionNoteColumns.some((column) => column.name === "rule_target")) {
+    database.exec("ALTER TABLE convention_notes ADD COLUMN rule_target TEXT NOT NULL DEFAULT 'implementation';");
   }
   const agentRunColumnNames = new Set(
     (database.prepare("PRAGMA table_info(agent_runs)").all() as Array<{ name: string }>).map((column) => column.name)
@@ -506,6 +511,10 @@ function mapConvention(row: Record<string, unknown>): ConventionNote {
   return {
     id: String(row.id),
     projectPath: String(row.project_path),
+    ruleTarget:
+      row.rule_target === "research_planning" || row.rule_target === "implementation"
+        ? (String(row.rule_target) as ConventionNote["ruleTarget"])
+        : "implementation",
     category: String(row.category),
     rule: String(row.rule),
     reason: String(row.reason),
@@ -1272,12 +1281,13 @@ export function createConventionNote(input: Omit<ConventionNote, "id" | "created
   getDb()
     .prepare(
       `INSERT INTO convention_notes
-      (id, project_path, category, rule, reason, source, confidence, examples, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      (id, project_path, rule_target, category, rule, reason, source, confidence, examples, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       note.id,
       note.projectPath,
+      note.ruleTarget,
       note.category,
       note.rule,
       note.reason,
@@ -1294,11 +1304,10 @@ export function listConventionNotes(projectPath?: string): ConventionNote[] {
   const database = getDb();
   const rows = projectPath
     ? (database
-        .prepare("SELECT * FROM convention_notes WHERE project_path = ? ORDER BY category, created_at DESC")
+        .prepare("SELECT * FROM convention_notes WHERE project_path = ? ORDER BY rule_target, category, created_at DESC")
         .all(projectPath) as Record<string, unknown>[])
-    : (database.prepare("SELECT * FROM convention_notes ORDER BY project_path, category, created_at DESC").all() as Record<
-        string,
-        unknown
-      >[]);
+    : (database
+        .prepare("SELECT * FROM convention_notes ORDER BY project_path, rule_target, category, created_at DESC")
+        .all() as Record<string, unknown>[]);
   return rows.map(mapConvention);
 }

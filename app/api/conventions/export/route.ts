@@ -15,7 +15,8 @@ function renderConventions(projectPath: string): { agents: string; conventions: 
   const notes = listConventionNotes(projectPath);
   const grouped = new Map<string, typeof notes>();
   for (const note of notes) {
-    grouped.set(note.category, [...(grouped.get(note.category) || []), note]);
+    const key = `${note.ruleTarget}:${note.category}`;
+    grouped.set(key, [...(grouped.get(key) || []), note]);
   }
 
   const conventions = [
@@ -23,17 +24,23 @@ function renderConventions(projectPath: string): { agents: string; conventions: 
     "",
     `Project: ${projectPath}`,
     "",
-    ...[...grouped.entries()].flatMap(([category, categoryNotes]) => [
-      `## ${category}`,
-      "",
-      ...categoryNotes.flatMap((note) => [
-        `- ${note.rule}`,
-        note.reason ? `  - Reason: ${note.reason}` : "",
-        note.examples ? `  - Examples: ${note.examples}` : "",
-        `  - Source: ${note.source}; confidence: ${note.confidence}`,
-        ""
-      ])
-    ])
+    ...[...grouped.entries()].flatMap(([key, categoryNotes]) => {
+      const [ruleTarget, category] = key.split(":", 2);
+      const targetLabel = ruleTarget === "research_planning" ? "Research And Planning" : "Implementation";
+      return [
+        `## ${category}`,
+        "",
+        `Applies to: ${targetLabel}`,
+        "",
+        ...categoryNotes.flatMap((note) => [
+          `- ${note.rule}`,
+          note.reason ? `  - Reason: ${note.reason}` : "",
+          note.examples ? `  - Examples: ${note.examples}` : "",
+          `  - Source: ${note.source}; confidence: ${note.confidence}`,
+          ""
+        ])
+      ];
+    })
   ]
     .filter(Boolean)
     .join("\n");
