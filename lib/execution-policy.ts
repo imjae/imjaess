@@ -56,12 +56,14 @@ export function buildManagedPrompt(input: {
     "- Stay inside your assigned role and do not redo other agents' work.",
     "- Read or execute only what is necessary for this slice.",
     "- Prefer concise handoff summaries over long logs or full file dumps.",
-    "- End with a HANDOFF SUMMARY section: result, evidence, remaining risks, next action.",
+    input.role === "planner"
+      ? "- End with a Korean `핸드오프 요약` section: 결과, 근거, 남은 위험, 다음 행동."
+      : "- End with a HANDOFF SUMMARY section: result, evidence, remaining risks, next action.",
     input.role === "researcher"
       ? "- Produce facts, paths, commands, and evidence only. Do not propose implementation code unless asked."
       : "",
     input.role === "planner"
-      ? "- Turn evidence into concise questions and an implementation plan. Do not edit files."
+      ? "- Turn evidence into concise Korean questions and a Korean implementation plan. Do not edit files."
       : "",
     input.role === "implementer"
       ? "- Implement from the broker-provided evidence only. Do not assume hidden tester behavior."

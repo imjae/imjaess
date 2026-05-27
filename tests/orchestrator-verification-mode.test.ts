@@ -113,9 +113,11 @@ describe("orchestrator verification modes", () => {
     await processTask(task.id);
 
     const detail = getTaskDetail(task.id);
+    const plannerQuestions = detail?.brokerArtifacts.find((artifact) => artifact.kind === "plan_questions");
     expect(detail?.status).toBe("waiting_for_user");
     expect(detail?.agentRuns.map((run) => run.role)).toEqual(["researcher", "planner"]);
-    expect(detail?.brokerArtifacts.some((artifact) => artifact.kind === "plan_questions")).toBe(true);
+    expect(plannerQuestions?.content).toContain("브로커 Planner 질문");
+    expect(plannerQuestions?.content).toContain("질문:");
     expect(detail?.agentRuns.some((run) => run.role === "implementer")).toBe(false);
   });
 
@@ -143,8 +145,10 @@ describe("orchestrator verification modes", () => {
     await processTask(task.id);
 
     const detail = getTaskDetail(task.id);
+    const planBrief = detail?.brokerArtifacts.find((artifact) => artifact.kind === "plan_brief");
     expect(detail?.status).toBe("done");
     expect(detail?.agentRuns.map((run) => run.role)).toEqual(["researcher", "planner", "implementer", "verifier"]);
-    expect(detail?.brokerArtifacts.some((artifact) => artifact.kind === "plan_brief")).toBe(true);
+    expect(planBrief?.content).toContain("브로커 구현 계획 요약");
+    expect(planBrief?.content).toContain("사용자 답변:");
   });
 });

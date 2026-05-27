@@ -44,6 +44,21 @@ describe("execution policy", () => {
     expect(managed.prompt).toContain("Test independently");
   });
 
+  it("requires Korean handoff content for planner prompts", () => {
+    const managed = buildManagedPrompt({
+      role: "planner",
+      prompt: "사용자 질문을 정리하세요.",
+      policy: {
+        contextBudgetChars: 1200,
+        outputBudgetChars: 500,
+        timeBudgetMs: 1000
+      }
+    });
+
+    expect(managed.prompt).toContain("Korean");
+    expect(managed.prompt).toContain("핸드오프 요약");
+  });
+
   it("compacts handoff text", () => {
     const handoff = compactHandoff("a".repeat(2000), {
       contextBudgetChars: 2000,

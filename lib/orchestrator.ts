@@ -289,8 +289,11 @@ export async function processTask(taskId: string, signal?: AbortSignal): Promise
                   `Your assigned planner workspace: ${researcherWorkspace.path}`,
                   "Use only the broker evidence pack and task brief.",
                   `Broker evidence pack:\n${evidencePack}`,
-                  "Ask the user only the questions required before implementation. Prefer 2-5 concrete questions.",
-                  "Also include a short draft implementation plan that can be revised after the user's answer.",
+                  "Write the planner response in Korean.",
+                  "Ask the user only the questions required before implementation. Prefer 2-5 concrete questions, written in Korean.",
+                  "Also include a short Korean draft implementation plan that can be revised after the user's answer.",
+                  "Use Korean headings such as `질문`, `임시 구현 계획`, and `핸드오프 요약`.",
+                  "Keep code identifiers, file paths, commands, branch names, and API names unchanged.",
                   "Do not implement and do not test."
                 ]
                   .filter(Boolean)
@@ -305,15 +308,15 @@ export async function processTask(taskId: string, signal?: AbortSignal): Promise
                 sourceRole: "planner",
                 kind: "plan_questions",
                 content: [
-                  "BROKER PLANNER QUESTIONS",
-                  "The task is waiting for the user's answer. User waiting time is not counted against an agent time budget.",
+                  "브로커 Planner 질문",
+                  "Task가 사용자 답변을 기다리고 있습니다. 사용자 대기 시간은 agent 시간 예산에 포함하지 않습니다.",
                   plannerOutput
                 ].join("\n\n")
               });
             }
             updateTask(taskId, {
               status: "waiting_for_user",
-              failureReason: "Planner is waiting for user answers before implementation."
+              failureReason: "Planner가 구현 전에 사용자 답변을 기다리고 있습니다."
             });
             finalStatus = "waiting_for_user";
             return;
@@ -324,10 +327,10 @@ export async function processTask(taskId: string, signal?: AbortSignal): Promise
             sourceRole: "broker",
             kind: "plan_brief",
             content: [
-              "BROKER PLAN BRIEF",
-              "This is the only planning handoff visible to the implementer.",
-              existingPlanQuestions ? `Planner questions and draft plan:\n${existingPlanQuestions.content}` : "",
-              `User answer:\n${planAnswer.content}`
+              "브로커 구현 계획 요약",
+              "이 내용은 implementer에게 전달되는 유일한 planning handoff입니다.",
+              existingPlanQuestions ? `Planner 질문 및 임시 구현 계획:\n${existingPlanQuestions.content}` : "",
+              `사용자 답변:\n${planAnswer.content}`
             ].join("\n\n")
           });
         }

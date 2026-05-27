@@ -95,12 +95,12 @@ function mockAgent(input: AgentInput): string {
   }
   if (input.role === "planner") {
     return [
-      `Mock planner round ${input.round} completed.`,
-      "Questions:",
-      "1. What constraints should the implementer preserve?",
-      "2. Which verification evidence matters most?",
+      `Mock planner 라운드 ${input.round} 완료.`,
+      "질문:",
+      "1. 구현자가 반드시 유지해야 할 제약은 무엇인가요?",
+      "2. 가장 중요하게 봐야 할 검증 근거는 무엇인가요?",
       "",
-      "Draft plan: answer the questions, then implement only the scoped change."
+      "임시 구현 계획: 질문에 답변을 받은 뒤 범위가 지정된 변경만 구현합니다."
     ].join("\n");
   }
   if (input.role === "tester") {
@@ -121,6 +121,9 @@ function buildInstructions(input: AgentInput): string {
     "You are context-isolated from other agents. Trust only the prompt and your own tool observations.",
     "Do not claim that another agent said something unless it appears in a broker artifact in your prompt.",
     "Keep outputs concise and decision-oriented.",
+    input.role === "planner"
+      ? "All planner-facing summaries, questions, draft plans, and handoff text must be written in Korean. Keep code identifiers, file paths, commands, and API names unchanged."
+      : "",
     input.role === "verifier"
       ? 'Return a final JSON object with keys "decision" and "summary". decision must be pass, needs_fix, or blocked.'
       : ""

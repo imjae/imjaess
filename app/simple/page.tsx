@@ -118,14 +118,14 @@ const statusLabels: Record<Task["status"], string> = {
 };
 
 const artifactLabels: Record<BrokerArtifact["kind"], string> = {
-  evidence_pack: "Evidence pack",
-  plan_questions: "Planner question",
-  plan_answer: "Planner answer",
-  plan_brief: "Plan brief",
-  implementation_brief: "Implementation brief",
-  test_brief: "Test brief",
-  test_result: "Test result",
-  final_brief: "Final brief"
+  evidence_pack: "조사 근거",
+  plan_questions: "Planner 질문",
+  plan_answer: "Planner 답변",
+  plan_brief: "구현 계획 요약",
+  implementation_brief: "구현 요약",
+  test_brief: "테스트 요약",
+  test_result: "테스트 결과",
+  final_brief: "최종 요약"
 };
 
 const roleLabels: Record<AgentRun["role"], string> = {
@@ -1087,7 +1087,7 @@ function TaskConversationItem(props: {
           <div className={styles.plannerCard}>
             <CircleAlert size={16} aria-hidden="true" />
             <div className={styles.summaryBody}>
-              <strong>Planner question</strong>
+              <strong>Planner 질문</strong>
               <pre>{trimText(props.plannerQuestions.content, 1200)}</pre>
             </div>
           </div>
