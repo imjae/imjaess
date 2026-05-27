@@ -138,9 +138,16 @@ const UI_TEXT = {
     selectedTaskSummary: "Selected Task",
     selectTargetFolder: "Select Target Folder",
     selectThisFolder: "Select This Folder",
+    serverControls: "Server",
+    serverShutdownDescription:
+      "Stops the local Next.js process. The page stays open, but API calls stop until you restart the server.",
+    serverShutdownQueued: "Shutdown requested. Restart the server from the terminal when you need it again.",
     settings: "Settings",
     serviceTier: "Speed",
     shellTab: "Shell",
+    shutdownServer: "Shut down server",
+    shutdownServerConfirm: "Shut down the local oh-my-codex server?",
+    shuttingDownServer: "Shutting down...",
     submitPlannerAnswer: "Submit and Resume",
     syncNotionTasks: "Push Task DB",
     taskTimeline: "Task timeline",
@@ -238,9 +245,16 @@ const UI_TEXT = {
     selectTaskEmpty: "Agent 출력과 verifier 판정을 확인할 Task를 선택하세요.",
     selectTargetFolder: "대상 폴더 선택",
     selectThisFolder: "이 폴더 선택",
+    serverControls: "서버",
+    serverShutdownDescription:
+      "로컬 Next.js 프로세스를 종료합니다. 페이지는 열려 있지만, 서버를 다시 시작할 때까지 API 호출은 중단됩니다.",
+    serverShutdownQueued: "종료를 요청했습니다. 다시 필요하면 터미널에서 서버를 시작하세요.",
     settings: "설정",
     serviceTier: "속도",
     shellTab: "Shell",
+    shutdownServer: "서버 종료",
+    shutdownServerConfirm: "로컬 oh-my-codex 서버를 종료할까요?",
+    shuttingDownServer: "종료 요청 중...",
     syncNotionTasks: "Task DB 올리기",
     taskTimeline: "Task 타임라인",
     collapseTaskTimeline: "Task 타임라인 접기",
@@ -786,10 +800,12 @@ export default function HomePage(): React.ReactElement {
   const [isUploadingAttachment, setUploadingAttachment] = useState(false);
   const [isSubmittingPlannerAnswer, setSubmittingPlannerAnswer] = useState(false);
   const [isCleaningWorktrees, setCleaningWorktrees] = useState(false);
+  const [isShuttingDownServer, setShuttingDownServer] = useState(false);
   const [isSettingsOpen, setSettingsOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [exportPreview, setExportPreview] = useState<string>("");
   const [worktreeCleanupSummary, setWorktreeCleanupSummary] = useState<string>("");
+  const [serverShutdownMessage, setServerShutdownMessage] = useState<string>("");
   const [scopeMention, setScopeMention] = useState<ScopeMention | null>(null);
   const [scopeImages, setScopeImages] = useState<File[]>([]);
   const [pathSuggestions, setPathSuggestions] = useState<PathSuggestion[]>([]);
@@ -1451,6 +1467,28 @@ export default function HomePage(): React.ReactElement {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setCleaningWorktrees(false);
+    }
+  }
+
+  async function shutdownServer(): Promise<void> {
+    if (isShuttingDownServer) {
+      return;
+    }
+    if (!window.confirm(tr(language, "shutdownServerConfirm"))) {
+      return;
+    }
+
+    setShuttingDownServer(true);
+    setServerShutdownMessage("");
+    setError(null);
+    try {
+      await jsonFetch<{ ok: boolean; delayMs: number; scheduled: boolean }>("/api/server/shutdown", {
+        method: "POST"
+      });
+      setServerShutdownMessage(tr(language, "serverShutdownQueued"));
+    } catch (err) {
+      setShuttingDownServer(false);
+      setError(err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -2169,6 +2207,25 @@ export default function HomePage(): React.ReactElement {
                   <pre>{worktreeCleanupSummary}</pre>
                 </div>
               ) : null}
+            </div>
+            <div className="settings-section">
+              <div className="section-title">
+                <StopCircle size={18} aria-hidden="true" />
+                {tr(language, "serverControls")}
+              </div>
+              <div className="notice-line">{tr(language, "serverShutdownDescription")}</div>
+              <div className="button-row">
+                <button
+                  className="btn danger"
+                  disabled={isShuttingDownServer}
+                  onClick={() => void shutdownServer()}
+                  type="button"
+                >
+                  <StopCircle size={16} aria-hidden="true" />
+                  {isShuttingDownServer ? tr(language, "shuttingDownServer") : tr(language, "shutdownServer")}
+                </button>
+              </div>
+              {serverShutdownMessage ? <div className="notice-line">{serverShutdownMessage}</div> : null}
             </div>
           </section>
         </div>

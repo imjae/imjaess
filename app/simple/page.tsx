@@ -311,7 +311,7 @@ export default function SimplePage(): React.ReactElement {
   const [taskDetails, setTaskDetails] = useState<TaskDetail[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [settings, setSettings] = useState<SimpleSettings>(defaultSettings);
-  const [tagInput, setTagInput] = useState("#SimpleUI");
+  const [tagInput, setTagInput] = useState("");
   const [pendingImages, setPendingImages] = useState<File[]>([]);
   const [localBranches, setLocalBranches] = useState<LocalBranch[]>([]);
   const [branchError, setBranchError] = useState<string | null>(null);
@@ -506,13 +506,12 @@ export default function SimplePage(): React.ReactElement {
 
   async function createRootTask(prompt: string): Promise<Task> {
     const shouldDelayStart = settings.approvalGrant && pendingImages.length > 0;
-    const rootTaskTags = taskTags.length > 0 ? taskTags : ["Simple UI"];
     const data = await jsonFetch<{ task: Task }>("/api/tasks", {
       method: "POST",
       body: JSON.stringify({
         title: titleFromPrompt(prompt),
-        taskTags: rootTaskTags,
-        taskGroup: rootTaskTags[0] || "",
+        taskTags,
+        taskGroup: taskTags[0] || "",
         goal: prompt,
         scope: "Submitted from the Simple UI chat surface.",
         targetProjectPath: settings.targetProjectPath,
@@ -670,7 +669,7 @@ export default function SimplePage(): React.ReactElement {
     setConversationIds([]);
     setTaskDetails([]);
     setMessage("");
-    setTagInput("#SimpleUI");
+    setTagInput("");
     setPendingImages([]);
     setError(null);
   }
