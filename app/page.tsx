@@ -392,6 +392,14 @@ function taskTagsOf(task: Pick<Task, "taskGroup" | "tags">): string[] {
   return tags.length > 0 ? tags : task.taskGroup.trim() ? [task.taskGroup.trim()] : [];
 }
 
+function comparableProjectPath(value: string): string {
+  return value.replace(/\//g, "\\").replace(/\\+$/g, "").toLowerCase();
+}
+
+function isSameProjectPath(left: string, right: string): boolean {
+  return comparableProjectPath(left) === comparableProjectPath(right);
+}
+
 function buildTaskTree(tasks: Task[]): TaskTreeNode[] {
   const nodes = new Map<string, TaskTreeNode>();
   const roots: TaskTreeNode[] = [];
@@ -972,6 +980,17 @@ export default function HomePage(): React.ReactElement {
       setDetailModalOpen(true);
     }
   }, [taskDetail]);
+
+  useEffect(() => {
+    if (!taskDetail?.targetProjectPath) {
+      return;
+    }
+    setNoteForm((current) =>
+      isSameProjectPath(current.projectPath, taskDetail.targetProjectPath)
+        ? current
+        : { ...current, projectPath: taskDetail.targetProjectPath }
+    );
+  }, [taskDetail?.targetProjectPath]);
 
   useEffect(() => {
     void refreshNotes().catch(() => undefined);
@@ -1970,6 +1989,18 @@ export default function HomePage(): React.ReactElement {
             </form>
             </div>
           </section>
+
+          <section className="panel">
+            <div className="panel-header">
+              <div className="panel-title">
+                <ScrollText size={18} aria-hidden="true" />
+                {language === "ko" ? "프로젝트 규칙" : "Project rules"}
+              </div>
+            </div>
+            <div className="panel-body">
+              <AppliedRulesPanel language={language} notes={notes} projectPath={taskForm.targetProjectPath} />
+            </div>
+          </section>
         </aside>
 
         <section className="detail-grid">
@@ -2793,6 +2824,7 @@ function TaskDetailView(props: {
       {props.task.failureReason ? <div className="error-text">{friendlyFailureReason(props.task.failureReason, props.language)}</div> : null}
       <ReviewBranchNotice task={props.task} language={props.language} />
       <div className="workspace-path">{props.task.worktreePath || props.task.targetProjectPath}</div>
+      <AppliedRulesPanel language={props.language} notes={props.notes} projectPath={props.task.targetProjectPath} />
 
       {shouldAnswerPlanner ? (
         <form className="planner-answer-card" onSubmit={(event) => void props.submitPlannerAnswer(event)}>
@@ -2983,6 +3015,70 @@ function TaskDetailView(props: {
         ) : null}
       </details>
     </div>
+  );
+}
+
+function AppliedRulesPanel(props: {
+  language: UiLanguage;
+  notes: ConventionNote[];
+  projectPath: string;
+}): React.ReactElement {
+  const projectNotes = props.notes.filter((note) => isSameProjectPath(note.projectPath, props.projectPath));
+  const implementationNotes = projectNotes.filter((note) => note.ruleTarget === "implementation");
+  const researchPlanningNotes = projectNotes.filter((note) => note.ruleTarget === "research_planning");
+  const title = props.language === "ko" ? "적용 규칙" : "Applied rules";
+  const implementationTitle = props.language === "ko" ? "Implementer가 받는 규칙" : "Rules sent to implementer";
+  const researchPlanningTitle =
+    props.language === "ko" ? "Research / planning 규칙" : "Research / planning rules";
+  const emptyText =
+    props.language === "ko"
+      ? "이 프로젝트에 기록된 규칙이 없습니다."
+      : "No rules are recorded for this project.";
+
+  function renderRuleGroup(label: string, groupNotes: ConventionNote[]): React.ReactElement | null {
+    if (groupNotes.length === 0) {
+      return null;
+    }
+    return (
+      <section className="applied-rule-group">
+        <div className="section-title">
+          <span>{label}</span>
+          <span className="section-count">{groupNotes.length}</span>
+        </div>
+        <div className="applied-rule-list">
+          {groupNotes.map((note) => (
+            <article className="applied-rule" key={note.id}>
+              <header>
+                <span>{note.category}</span>
+                <span>{confidenceLabel(note.confidence, props.language)}</span>
+              </header>
+              <p>{note.rule}</p>
+              {note.reason ? <small>{note.reason}</small> : null}
+              {note.examples ? <pre>{note.examples}</pre> : null}
+            </article>
+          ))}
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="applied-rules-panel">
+      <div className="section-title">
+        <ScrollText size={16} aria-hidden="true" />
+        <span>{title}</span>
+        <span className="section-count">{projectNotes.length}</span>
+      </div>
+      <div className="workspace-path">{props.projectPath}</div>
+      {projectNotes.length === 0 ? (
+        <div className="empty compact">{emptyText}</div>
+      ) : (
+        <>
+          {renderRuleGroup(implementationTitle, implementationNotes)}
+          {renderRuleGroup(researchPlanningTitle, researchPlanningNotes)}
+        </>
+      )}
+    </section>
   );
 }
 
@@ -3282,6 +3378,14 @@ function ConventionPanel(props: {
   return (
     <div className="detail-grid">
       <form className="form-grid" onSubmit={(event) => void props.submitNote(event)}>
+        <div className="field">
+          <label htmlFor="note-project-path">{tr(props.language, "targetProjectPath")}</label>
+          <input
+            id="note-project-path"
+            value={props.form.projectPath}
+            onChange={(event) => props.setForm((current) => ({ ...current, projectPath: event.target.value }))}
+          />
+        </div>
         <div className="field">
           <label htmlFor="note-rule">{tr(props.language, "rule")}</label>
           <input

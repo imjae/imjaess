@@ -399,6 +399,72 @@ button {
   padding: 10px;
 }
 
+.applied-rules-panel {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfbf8;
+  padding: 12px;
+}
+
+.applied-rule-group {
+  display: grid;
+  gap: 8px;
+}
+
+.applied-rule-list {
+  display: grid;
+  gap: 8px;
+}
+
+.applied-rule {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid #e0e4dc;
+  border-radius: 8px;
+  background: #fcfcfb;
+  padding: 10px;
+}
+
+.applied-rule header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #3d444d;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.applied-rule p {
+  margin: 0;
+  color: var(--ink);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.applied-rule small {
+  color: var(--muted);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.applied-rule pre {
+  margin: 0;
+  max-height: 150px;
+  overflow: auto;
+  border-top: 1px solid #e6e8e3;
+  padding-top: 8px;
+  color: #3f4751;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .settings-grid {
   display: grid;
   gap: 8px;
