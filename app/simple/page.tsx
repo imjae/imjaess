@@ -112,6 +112,7 @@ const statusLabels: Record<Task["status"], string> = {
   verifying: "검증 중",
   waiting_for_user: "답변 대기",
   needs_fix: "수정 필요",
+  ready_for_review: "검토 대기",
   done: "완료",
   blocked: "차단됨",
   canceled: "중단됨"
@@ -147,6 +148,14 @@ const visibleArtifactKinds = new Set<BrokerArtifact["kind"]>([
 
 function classNames(...classes: Array<string | false | null | undefined>): string {
   return classes.filter(Boolean).join(" ");
+}
+
+function safeRefPart(value: string): string {
+  return value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "item";
+}
+
+function reviewBranchName(taskId: string): string {
+  return `harness/review/${safeRefPart(taskId)}`;
 }
 
 function trimText(text: string, max = 900): string {
@@ -1092,6 +1101,15 @@ function TaskConversationItem(props: {
             </div>
           </div>
         ) : null}
+        {props.task.status === "ready_for_review" ? (
+          <div className={styles.plannerCard}>
+            <GitBranch size={16} aria-hidden="true" />
+            <div className={styles.summaryBody}>
+              <strong>검토 브랜치</strong>
+              <pre>{`git checkout ${reviewBranchName(props.task.id)}`}</pre>
+            </div>
+          </div>
+        ) : null}
         {artifacts.length > 0 ? (
           <div className={styles.artifactList}>
             {artifacts.slice(-4).map((artifact) => (
@@ -1104,6 +1122,20 @@ function TaskConversationItem(props: {
                   <Sparkles size={14} aria-hidden="true" />
                   {artifactLabels[artifact.kind]}
                 </summary>
+                {artifact.contract ? (
+                  <div className={styles.contractBox}>
+                    <strong>{artifact.contract.summary}</strong>
+                    {artifact.contract.claims.length > 0 ? (
+                      <ul>
+                        {artifact.contract.claims.slice(0, 3).map((claim) => (
+                          <li key={claim.id}>
+                            {claim.id} [{claim.confidence}]: {claim.text}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
+                ) : null}
                 <pre>{trimText(artifact.content)}</pre>
               </details>
             ))}

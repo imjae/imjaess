@@ -24,6 +24,10 @@ function createGitRepo(): string {
   return root;
 }
 
+function git(args: string[], cwd: string): string {
+  return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+}
+
 describe("orchestrator verification modes", () => {
   beforeEach(() => {
     process.env.HARNESS_DB_PATH = path.join(
@@ -38,6 +42,7 @@ describe("orchestrator verification modes", () => {
     resetDbForTests();
     delete process.env.HARNESS_DB_PATH;
     delete process.env.MOCK_AGENTS;
+    delete process.env.MAX_AGENT_ROUNDS;
   });
 
   it("skips the tester agent in fast mode", async () => {
@@ -55,9 +60,16 @@ describe("orchestrator verification modes", () => {
     await processTask(task.id);
 
     const detail = getTaskDetail(task.id);
-    expect(detail?.status).toBe("done");
+    expect(detail?.status).toBe("ready_for_review");
     expect(detail?.agentRuns.map((run) => run.role)).toEqual(["researcher", "implementer", "verifier"]);
     expect(detail?.brokerArtifacts.some((artifact) => artifact.kind === "test_result")).toBe(false);
+    expect(detail?.brokerArtifacts.find((artifact) => artifact.kind === "evidence_pack")?.contract?.claims.length).toBeGreaterThan(0);
+    expect(detail?.brokerArtifacts.find((artifact) => artifact.kind === "implementation_brief")?.contract?.evidence[0]?.type).toBe("diff");
+    expect(detail?.brokerArtifacts.find((artifact) => artifact.kind === "final_brief")?.contract?.claims[0]?.text).toContain(
+      "Verifier decision is pass"
+    );
+    expect(git(["branch", "--list", `harness/review/${task.id}`], root)).toContain(`harness/review/${task.id}`);
+    expect(git(["branch", "--list", "imjae"], root)).toBe("");
   });
 
   it("keeps the tester agent in balanced mode", async () => {
@@ -75,9 +87,10 @@ describe("orchestrator verification modes", () => {
     await processTask(task.id);
 
     const detail = getTaskDetail(task.id);
-    expect(detail?.status).toBe("done");
+    expect(detail?.status).toBe("ready_for_review");
     expect(detail?.agentRuns.map((run) => run.role)).toEqual(["researcher", "implementer", "tester", "verifier"]);
     expect(detail?.brokerArtifacts.some((artifact) => artifact.kind === "test_result")).toBe(true);
+    expect(detail?.brokerArtifacts.find((artifact) => artifact.kind === "test_result")?.contract?.evidence[0]?.type).toBe("test");
   });
 
   it("runs explicit shell verification as verifier evidence in fast mode", async () => {
@@ -99,9 +112,42 @@ describe("orchestrator verification modes", () => {
     await processTask(task.id);
 
     const detail = getTaskDetail(task.id);
+    const finalBrief = detail?.brokerArtifacts.find((artifact) => artifact.kind === "final_brief");
+    expect(detail?.status).toBe("ready_for_review");
+    expect(detail?.worktreePath).toBe(root);
     expect(detail?.agentRuns.map((run) => run.role)).toEqual(["researcher", "implementer", "verifier"]);
     expect(detail?.shellLogs[0]?.agentRole).toBe("verifier");
     expect(detail?.verifications[0]?.command).toBe("Write-Output ok");
+    expect(finalBrief?.content).toContain("READY FOR REVIEW");
+    expect(finalBrief?.content).toContain(`git checkout harness/review/${task.id}`);
+    expect(git(["branch", "--list", "imjae"], root)).toBe("");
+  });
+
+  it("downgrades verifier pass when shell verification fails", async () => {
+    process.env.MAX_AGENT_ROUNDS = "1";
+    const root = createGitRepo();
+    upsertProject({
+      path: root,
+      verificationCommand: "exit 7"
+    });
+    const task = createTask({
+      title: "Failing shell validation",
+      goal: "Do not pass failed shell evidence",
+      scope: "",
+      targetProjectPath: root,
+      agentPlan: "Plan",
+      verificationMode: "fast",
+      approvalGrant: true
+    });
+
+    await processTask(task.id);
+
+    const detail = getTaskDetail(task.id);
+    const finalBrief = detail?.brokerArtifacts.find((artifact) => artifact.kind === "final_brief");
+    expect(detail?.status).toBe("blocked");
+    expect(detail?.verifications[0]?.decision).toBe("needs_fix");
+    expect(finalBrief?.content).toContain("downgraded by the evidence contract guardrail");
+    expect(finalBrief?.contract?.acceptanceCriteriaStatus.some((criterion) => criterion.status === "fail")).toBe(true);
   });
 
   it("applies research/planning and implementation rules to the matching agents", async () => {
@@ -197,7 +243,7 @@ describe("orchestrator verification modes", () => {
 
     const detail = getTaskDetail(task.id);
     const planBrief = detail?.brokerArtifacts.find((artifact) => artifact.kind === "plan_brief");
-    expect(detail?.status).toBe("done");
+    expect(detail?.status).toBe("ready_for_review");
     expect(detail?.agentRuns.map((run) => run.role)).toEqual(["researcher", "implementer", "verifier"]);
     expect(planBrief?.content).toContain("브로커 구현 계획 요약");
     expect(planBrief?.content).toContain("사용자 답변:");

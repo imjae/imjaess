@@ -84,6 +84,37 @@ describe("worktree cleanup", () => {
     expect(fs.existsSync(doneWorktree)).toBe(false);
   });
 
+  it("removes review-ready worktrees but preserves review branches", async () => {
+    const root = initRepo();
+    const worktreePath = addWorktree(root, "task-review");
+    git(["branch", "harness/review/task-review", "HEAD"], root);
+
+    const summary = await cleanupSingleTaskWorktrees({
+      task: task({ id: "task-review", root, status: "ready_for_review" })
+    });
+
+    expect(summary.errors).toEqual([]);
+    expect(fs.existsSync(worktreePath)).toBe(false);
+    expect(git(["branch", "--list", "harness/task-review/*"], root)).toBe("");
+    expect(git(["branch", "--list", "harness/review/task-review"], root)).toContain("harness/review/task-review");
+  });
+
+  it("preserves review branches during all cleanup", async () => {
+    const root = initRepo();
+    git(["branch", "harness/review/orphan-task", "HEAD"], root);
+    git(["branch", "harness/orphan-task/implementer/r1", "HEAD"], root);
+
+    const summary = await cleanupWorktrees({
+      mode: "all",
+      tasks: [],
+      projectPaths: [root]
+    });
+
+    expect(summary.errors).toEqual([]);
+    expect(git(["branch", "--list", "harness/review/orphan-task"], root)).toContain("harness/review/orphan-task");
+    expect(git(["branch", "--list", "harness/orphan-task/implementer/r1"], root)).toBe("");
+  });
+
   it("removes only expired blocked worktrees for TTL cleanup", async () => {
     const root = initRepo();
     const oldBlockedWorktree = addWorktree(root, "task-old");

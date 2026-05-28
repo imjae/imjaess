@@ -11,6 +11,7 @@ import {
   getTaskDetail,
   getDb,
   getNotionSettings,
+  insertBrokerArtifact,
   insertShellLog,
   insertTaskAttachment,
   listTaskAttachments,
@@ -98,6 +99,42 @@ describe("task persistence", () => {
     });
 
     expect(getTaskDetail(task.id)?.planningMode).toBe("plan");
+  });
+
+  it("stores structured broker artifact contracts with legacy content", () => {
+    const task = createTask({
+      title: "Contract task",
+      goal: "Goal",
+      scope: "Scope",
+      targetProjectPath: "C:\\repo",
+      agentPlan: "Plan",
+      approvalGrant: true
+    });
+
+    insertBrokerArtifact({
+      taskId: task.id,
+      round: 1,
+      sourceRole: "broker",
+      kind: "implementation_brief",
+      content: "Legacy summary",
+      contract: {
+        version: "1",
+        kind: "implementation_brief",
+        summary: "Structured summary",
+        claims: [{ id: "claim-1", text: "Claim", confidence: "high", evidenceIds: ["ev-1"] }],
+        evidence: [{ id: "ev-1", type: "diff", reference: "git diff", excerpt: "diff --git" }],
+        filesTouched: ["lib/example.ts"],
+        commandsRun: [],
+        unverifiedAssumptions: [],
+        residualRisks: [],
+        acceptanceCriteriaStatus: [{ criterion: "Diff captured", status: "pass", evidenceIds: ["ev-1"] }]
+      }
+    });
+
+    const artifact = getTaskDetail(task.id)?.brokerArtifacts[0];
+    expect(artifact?.content).toBe("Legacy summary");
+    expect(artifact?.contract?.summary).toBe("Structured summary");
+    expect(artifact?.contract?.claims[0]?.evidenceIds).toEqual(["ev-1"]);
   });
 
   it("stores convention notes by rule target", () => {

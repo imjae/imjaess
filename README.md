@@ -89,8 +89,8 @@ For Unity projects, the harness avoids mutating the editor checkout for implemen
 - `implementer` changes are committed to `harness/<task>/implementer/rN`.
 - `tester` gets a worktree based on that implementation commit and runs the configured verification command there.
 - `verifier` judges from broker artifacts and command evidence, reusing the clean implementation worktree instead of creating another role worktree.
-- Only a `pass` verifier decision merges the implementation branch into `HARNESS_INTEGRATION_BRANCH`, which defaults to `imjae`.
-- Open Unity against the `imjae` integration branch/worktree for manual visual confirmation, then merge to `main` outside the harness when satisfied.
+- A `pass` verifier decision creates or updates `harness/review/<task-id>` and leaves the task in `ready_for_review`.
+- Check out the review branch in the normal Unity checkout for manual confirmation, then merge through your own git workflow when satisfied.
 
 ## Scope References
 

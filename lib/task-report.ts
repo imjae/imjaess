@@ -1,3 +1,4 @@
+import { formatEvidenceContractMarkdown } from "@/lib/evidence-contract";
 import type { TaskDetail } from "@/lib/types";
 
 export type TaskReportLanguage = "en" | "ko";
@@ -92,6 +93,8 @@ export function taskReportMarkdown(
       lines(
         `### ${artifact.kind} (${artifact.sourceRole}, ${rt(language, "round")} ${artifact.round})`,
         "",
+        artifact.contract ? formatEvidenceContractMarkdown(artifact.contract) : null,
+        artifact.contract ? "" : null,
         artifact.content,
         ""
       )

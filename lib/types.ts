@@ -1,3 +1,5 @@
+import type { EvidenceContract } from "@/lib/evidence-contract";
+
 export type TaskStatus =
   | "queued"
   | "running"
@@ -5,6 +7,7 @@ export type TaskStatus =
   | "verifying"
   | "waiting_for_user"
   | "needs_fix"
+  | "ready_for_review"
   | "done"
   | "blocked"
   | "canceled";
@@ -141,6 +144,7 @@ export interface BrokerArtifact {
     | "test_result"
     | "final_brief";
   content: string;
+  contract: EvidenceContract | null;
   createdAt: string;
 }
 

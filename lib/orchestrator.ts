@@ -16,10 +16,18 @@ import {
 } from "@/lib/db";
 import { maxAgentRounds, modelFor, providerFor, reasoningEffortFor, serviceTierFor } from "@/lib/config";
 import { runAgent } from "@/lib/agents";
-import { commitWorkspaceChanges, createAgentWorkspace, getDiffSummary, mergeIntoIntegration } from "@/lib/git";
+import { commitWorkspaceChanges, createAgentWorkspace, createOrUpdateReviewBranch, getDiffSummary } from "@/lib/git";
 import { runShell } from "@/lib/shell";
+import type { ShellResult } from "@/lib/shell";
 import { parseVerifierDecision } from "@/lib/decision";
-import type { AgentRole, Task } from "@/lib/types";
+import {
+  contractHasFailedCriteria,
+  createEvidenceContract,
+  formatBrokerArtifactForHandoff,
+  summarizeText
+} from "@/lib/evidence-contract";
+import type { EvidenceContract, EvidenceContractCriterion } from "@/lib/evidence-contract";
+import type { AgentRole, BrokerArtifact, Task, VerificationDecision } from "@/lib/types";
 import { buildManagedPrompt, compactHandoff, executionPolicy, withAgentTimeout } from "@/lib/execution-policy";
 import { buildScopeReferenceContext } from "@/lib/scope-references";
 import {
@@ -130,13 +138,245 @@ function brokerArtifact(input: {
   sourceRole: Parameters<typeof insertBrokerArtifact>[0]["sourceRole"];
   kind: Parameters<typeof insertBrokerArtifact>[0]["kind"];
   content: string;
+  contract?: EvidenceContract | null;
 }): string {
   const content = compactHandoff(input.content, executionPolicy());
-  insertBrokerArtifact({
+  const artifact = insertBrokerArtifact({
     ...input,
     content
   });
-  return content;
+  return formatBrokerArtifactForHandoff(artifact);
+}
+
+function brokerArtifactHandoff(artifact?: BrokerArtifact | null): string {
+  return artifact ? formatBrokerArtifactForHandoff(artifact) : "";
+}
+
+function evidenceReference(id: string, type: EvidenceContract["evidence"][number]["type"], reference: string, excerpt?: string) {
+  return {
+    id,
+    type,
+    reference,
+    ...(excerpt ? { excerpt } : {})
+  };
+}
+
+function changedFilesFromDiffSummary(diffSummary: string): string[] {
+  const files = new Set<string>();
+  for (const line of diffSummary.split(/\r?\n/)) {
+    const match = line.match(/^(?:diff --git a\/.* b\/|[MADRCU?]{1,2}\s+)(.+)$/);
+    if (match?.[1]) {
+      files.add(match[1].trim());
+    }
+  }
+  return [...files];
+}
+
+function commandCriterion(commandResult: ShellResult | null): EvidenceContractCriterion {
+  if (!commandResult) {
+    return {
+      criterion: "No explicit verification command was configured.",
+      status: "unknown",
+      evidenceIds: [],
+      notes: "Verifier must judge from broker artifacts and diff evidence."
+    };
+  }
+  return {
+    criterion: `Verification command succeeds: ${commandResult.command}`,
+    status: commandResult.exitCode === 0 ? "pass" : "fail",
+    evidenceIds: ["command-1"],
+    notes: `Exit code: ${commandResult.exitCode ?? "signal"}`
+  };
+}
+
+function decisionCriterion(decision: VerificationDecision): EvidenceContractCriterion {
+  return {
+    criterion: "Verifier returned a valid final decision.",
+    status: decision === "blocked" ? "fail" : decision === "needs_fix" ? "unknown" : "pass",
+    evidenceIds: ["verifier-output"],
+    notes: decision
+  };
+}
+
+function buildResearchContract(kind: BrokerArtifact["kind"], content: string): EvidenceContract {
+  return createEvidenceContract({
+    kind,
+    summary: summarizeText(content, "Research evidence was packaged."),
+    claims: [
+      {
+        id: "claim-1",
+        text: "Research findings are available as broker-scoped evidence for the next role.",
+        confidence: "medium",
+        evidenceIds: ["artifact-1"]
+      }
+    ],
+    evidence: [evidenceReference("artifact-1", "artifact", `${kind} broker artifact`, content)],
+    unverifiedAssumptions: [],
+    residualRisks: ["The broker did not independently re-run every researcher observation."],
+    acceptanceCriteriaStatus: [
+      {
+        criterion: "Research output was reduced to broker handoff form.",
+        status: "pass",
+        evidenceIds: ["artifact-1"]
+      }
+    ]
+  });
+}
+
+function buildPlanContract(kind: BrokerArtifact["kind"], content: string): EvidenceContract {
+  return createEvidenceContract({
+    kind,
+    summary: summarizeText(content, "Planning artifact was packaged."),
+    claims: [
+      {
+        id: "claim-1",
+        text: "Planning handoff is available for implementation.",
+        confidence: "medium",
+        evidenceIds: ["artifact-1"]
+      }
+    ],
+    evidence: [evidenceReference("artifact-1", "artifact", `${kind} broker artifact`, content)],
+    unverifiedAssumptions: [],
+    residualRisks: [],
+    acceptanceCriteriaStatus: [
+      {
+        criterion: "Planner/user handoff was captured.",
+        status: "pass",
+        evidenceIds: ["artifact-1"]
+      }
+    ]
+  });
+}
+
+function buildImplementationContract(input: {
+  content: string;
+  diffSummary: string;
+  implementationRef: string;
+  filesTouched: string[];
+  commandResult: ShellResult | null;
+}): EvidenceContract {
+  return createEvidenceContract({
+    kind: "implementation_brief",
+    summary: summarizeText(input.content, "Implementation evidence was packaged."),
+    claims: [
+      {
+        id: "claim-1",
+        text: "Implementation changes were summarized from the committed worktree diff.",
+        confidence: "high",
+        evidenceIds: ["diff-1"]
+      },
+      {
+        id: "claim-2",
+        text: "Shell verification status is available to downstream verification.",
+        confidence: input.commandResult ? "high" : "low",
+        evidenceIds: input.commandResult ? ["command-1"] : []
+      }
+    ],
+    evidence: [
+      evidenceReference("diff-1", "diff", `Implementation ref: ${input.implementationRef}`, input.diffSummary),
+      ...(input.commandResult
+        ? [
+            evidenceReference(
+              "command-1",
+              "command",
+              input.commandResult.command,
+              `Exit code: ${input.commandResult.exitCode ?? "signal"}`
+            )
+          ]
+        : [])
+    ],
+    filesTouched: input.filesTouched,
+    commandsRun: input.commandResult
+      ? [
+          {
+            command: input.commandResult.command,
+            cwd: input.commandResult.cwd,
+            exitCode: input.commandResult.exitCode,
+            purpose: "Configured verification command."
+          }
+        ]
+      : [],
+    unverifiedAssumptions: input.commandResult ? [] : ["No explicit verification command was configured for this task."],
+    residualRisks: input.commandResult?.exitCode === 0 ? [] : ["Verifier must decide whether remaining evidence is sufficient."],
+    acceptanceCriteriaStatus: [
+      {
+        criterion: "Implementation diff was captured.",
+        status: "pass",
+        evidenceIds: ["diff-1"]
+      },
+      commandCriterion(input.commandResult)
+    ]
+  });
+}
+
+function buildTestContract(content: string): EvidenceContract {
+  return createEvidenceContract({
+    kind: "test_result",
+    summary: summarizeText(content, "Tester evidence was packaged."),
+    claims: [
+      {
+        id: "claim-1",
+        text: "Independent tester result is available to the verifier.",
+        confidence: "medium",
+        evidenceIds: ["tester-output"]
+      }
+    ],
+    evidence: [evidenceReference("tester-output", "test", "tester broker artifact", content)],
+    unverifiedAssumptions: [],
+    residualRisks: ["Tester output is model-generated and should be checked against deterministic command evidence when available."],
+    acceptanceCriteriaStatus: [
+      {
+        criterion: "Tester produced a broker-scoped result.",
+        status: "pass",
+        evidenceIds: ["tester-output"]
+      }
+    ]
+  });
+}
+
+function buildFinalContract(input: {
+  content: string;
+  decision: VerificationDecision;
+  commandResult: ShellResult | null;
+}): EvidenceContract {
+  return createEvidenceContract({
+    kind: "final_brief",
+    summary: summarizeText(input.content, "Verifier final brief was packaged."),
+    claims: [
+      {
+        id: "claim-1",
+        text: `Verifier decision is ${input.decision}.`,
+        confidence: "high",
+        evidenceIds: ["verifier-output"]
+      }
+    ],
+    evidence: [
+      evidenceReference("verifier-output", "artifact", "verifier output", input.content),
+      ...(input.commandResult
+        ? [
+            evidenceReference(
+              "command-1",
+              "command",
+              input.commandResult.command,
+              `Exit code: ${input.commandResult.exitCode ?? "signal"}`
+            )
+          ]
+        : [])
+    ],
+    commandsRun: input.commandResult
+      ? [
+          {
+            command: input.commandResult.command,
+            cwd: input.commandResult.cwd,
+            exitCode: input.commandResult.exitCode,
+            purpose: "Final verification evidence."
+          }
+        ]
+      : [],
+    unverifiedAssumptions: input.commandResult ? [] : ["No explicit verification command was configured for this task."],
+    residualRisks: input.decision === "pass" ? [] : [input.content],
+    acceptanceCriteriaStatus: [decisionCriterion(input.decision), commandCriterion(input.commandResult)]
+  });
 }
 
 async function runRole(input: {
@@ -269,7 +509,7 @@ export async function processTask(taskId: string, signal?: AbortSignal): Promise
       const existingPlanBrief = isPlanModeFirstRound ? getBrokerArtifact(taskId, round, "plan_brief") : null;
       const existingPlanQuestions = isPlanModeFirstRound ? getBrokerArtifact(taskId, round, "plan_questions") : null;
       const planAnswer = isPlanModeFirstRound ? getBrokerArtifact(taskId, round, "plan_answer") : null;
-      let planQuestions = existingPlanQuestions?.content || "";
+      let planQuestions = brokerArtifactHandoff(existingPlanQuestions);
       const researchPlanningRules = conventionRuleBrief(projectPath, "research_planning");
       const implementationRules = conventionRuleBrief(projectPath, "implementation");
       const researcherWorkspace =
@@ -288,7 +528,7 @@ export async function processTask(taskId: string, signal?: AbortSignal): Promise
               baseRef: implementationBaseRef
             });
       const scopeReferenceContext = await buildScopeReferenceContext(task.scope, researcherWorkspace.path);
-      let evidencePack = existingEvidencePack?.content || "";
+      let evidencePack = brokerArtifactHandoff(existingEvidencePack);
       if (!evidencePack) {
         const shouldCombineResearchAndPlanning = isPlanModeFirstRound && !existingPlanBrief && !planAnswer && !planQuestions;
         const researcherPrompt = shouldCombineResearchAndPlanning
@@ -341,7 +581,15 @@ export async function processTask(taskId: string, signal?: AbortSignal): Promise
             "BROKER EVIDENCE PACK",
             "This is the only researcher output visible to the implementer.",
             researchPlanningOutput.evidence
-          ].join("\n\n")
+          ].join("\n\n"),
+          contract: buildResearchContract(
+            "evidence_pack",
+            [
+              "BROKER EVIDENCE PACK",
+              "This is the only researcher output visible to the implementer.",
+              researchPlanningOutput.evidence
+            ].join("\n\n")
+          )
         });
         if (shouldCombineResearchAndPlanning) {
           planQuestions = brokerArtifact({
@@ -353,14 +601,22 @@ export async function processTask(taskId: string, signal?: AbortSignal): Promise
               "브로커 조사/계획 질문",
               "Task가 사용자 답변을 기다리고 있습니다. 사용자 대기 시간은 agent 시간 예산에 포함하지 않습니다.",
               researchPlanningOutput.planQuestions
-            ].join("\n\n")
+            ].join("\n\n"),
+            contract: buildPlanContract(
+              "plan_questions",
+              [
+                "Broker research/planning questions",
+                "Task is waiting for user answers before implementation.",
+                researchPlanningOutput.planQuestions
+              ].join("\n\n")
+            )
           });
         }
       }
 
       let planBrief = "";
       if (isPlanModeFirstRound) {
-        planBrief = existingPlanBrief?.content || "";
+        planBrief = brokerArtifactHandoff(existingPlanBrief);
         if (!planBrief) {
           if (!planAnswer) {
             updateTask(taskId, { status: "reviewing" });
@@ -375,7 +631,15 @@ export async function processTask(taskId: string, signal?: AbortSignal): Promise
                   "Task가 사용자 답변을 기다리고 있습니다. 사용자 대기 시간은 agent 시간 예산에 포함하지 않습니다.",
                   "조사/계획 산출물이 질문 섹션을 분리하지 못했습니다. Evidence pack을 검토한 뒤 사용자 답변을 제출해 주세요.",
                   evidencePack
-                ].join("\n\n")
+                ].join("\n\n"),
+                contract: buildPlanContract(
+                  "plan_questions",
+                  [
+                    "Broker research/planning questions",
+                    "Task is waiting for user answers before implementation.",
+                    evidencePack
+                  ].join("\n\n")
+                )
               });
             }
             updateTask(taskId, {
@@ -478,61 +742,72 @@ export async function processTask(taskId: string, signal?: AbortSignal): Promise
           })
         : null;
       assertNotCanceled(signal);
+      const filesTouched = changedFilesFromDiffSummary(diffSummary);
+      const implementationBriefContent = [
+        "BROKER IMPLEMENTATION BRIEF",
+        "The tester does not receive implementer output or implementation intent.",
+        `Implementer worktree: ${implementerWorkspace.path}`,
+        implementerWorkspace.branchName ? `Implementer branch: ${implementerWorkspace.branchName}` : "",
+        `Implementation ref: ${implementationCommit.ref}`,
+        `Implementation commit: ${implementationCommit.summary}`,
+        `Verification mode: ${isBalancedVerification ? "balanced" : "fast"}`,
+        testerWorkspace ? `Tester worktree: ${testerWorkspace.path}` : `Verifier/shell workspace: ${commandWorkspace.path}`,
+        testerWorkspace?.branchName ? `Tester branch: ${testerWorkspace.branchName}` : "",
+        verificationPreparationSummary,
+        `Diff summary:\n${diffSummary}`,
+        commandResult
+          ? `Verification command result:\nCommand: ${commandResult.command}\nExit code: ${commandResult.exitCode}`
+          : "No verification command configured."
+      ]
+        .filter(Boolean)
+        .join("\n\n");
       const implementationBrief = brokerArtifact({
         taskId,
         round,
         sourceRole: "broker",
         kind: "implementation_brief",
-        content: [
-          "BROKER IMPLEMENTATION BRIEF",
-          "The tester does not receive implementer output or implementation intent.",
-          `Implementer worktree: ${implementerWorkspace.path}`,
-          implementerWorkspace.branchName ? `Implementer branch: ${implementerWorkspace.branchName}` : "",
-          `Implementation ref: ${implementationCommit.ref}`,
-          `Implementation commit: ${implementationCommit.summary}`,
-          `Verification mode: ${isBalancedVerification ? "balanced" : "fast"}`,
-          testerWorkspace ? `Tester worktree: ${testerWorkspace.path}` : `Verifier/shell workspace: ${commandWorkspace.path}`,
-          testerWorkspace?.branchName ? `Tester branch: ${testerWorkspace.branchName}` : "",
-          verificationPreparationSummary,
-          `Diff summary:\n${diffSummary}`,
+        content: implementationBriefContent,
+        contract: buildImplementationContract({
+          content: implementationBriefContent,
+          diffSummary,
+          implementationRef: implementationCommit.ref,
+          filesTouched,
           commandResult
-            ? `Verification command result:\nCommand: ${commandResult.command}\nExit code: ${commandResult.exitCode}`
-            : "No verification command configured."
-        ]
-          .filter(Boolean)
-          .join("\n\n")
+        })
       });
 
-      const testResult = testerWorkspace
-        ? brokerArtifact({
-            taskId,
-            round,
-            sourceRole: "tester",
-            kind: "test_result",
-            content: [
-              "BROKER TEST RESULT",
-              "This is the only tester output visible to the verifier.",
-              await runRole({
-                task: refreshedTask,
-                role: "tester",
-                round,
-                prompt: [
-                  taskBrief(refreshedTask, round, "", scopeReferenceContext),
-                  `Your isolated tester worktree: ${testerWorkspace.path}`,
-                  testerWorkspace.branchName ? `Your branch: ${testerWorkspace.branchName}` : "",
-                  `Broker implementation brief:\n${implementationBrief}`,
-                  "Test independently from implementation intent. Use run_shell if needed.",
-                  "Return what was tested, evidence, failures, and residual risk. Do not ask the implementer for clarification."
-                ]
-                  .filter(Boolean)
-                  .join("\n\n"),
-                workspacePath: testerWorkspace.path,
-                branchName: testerWorkspace.branchName,
-                signal
-              })
-            ].join("\n\n")
-          })
-        : "";
+      let testResult = "";
+      if (testerWorkspace) {
+        const testerOutput = await runRole({
+          task: refreshedTask,
+          role: "tester",
+          round,
+          prompt: [
+            taskBrief(refreshedTask, round, "", scopeReferenceContext),
+            `Your isolated tester worktree: ${testerWorkspace.path}`,
+            testerWorkspace.branchName ? `Your branch: ${testerWorkspace.branchName}` : "",
+            `Broker implementation brief:\n${implementationBrief}`,
+            "Test independently from implementation intent. Use run_shell if needed.",
+            "Return what was tested, evidence, failures, and residual risk. Do not ask the implementer for clarification."
+          ]
+            .filter(Boolean)
+            .join("\n\n"),
+          workspacePath: testerWorkspace.path,
+          branchName: testerWorkspace.branchName,
+          signal
+        });
+        const testResultContent = ["BROKER TEST RESULT", "This is the only tester output visible to the verifier.", testerOutput].join(
+          "\n\n"
+        );
+        testResult = brokerArtifact({
+          taskId,
+          round,
+          sourceRole: "tester",
+          kind: "test_result",
+          content: testResultContent,
+          contract: buildTestContract(testResultContent)
+        });
+      }
 
       updateTask(taskId, { status: "verifying" });
       const verifierWorkspace = implementerWorkspace;
@@ -564,7 +839,27 @@ export async function processTask(taskId: string, signal?: AbortSignal): Promise
         signal
       });
       assertNotCanceled(signal);
-      const parsed = parseVerifierDecision(verifierOutput);
+      let parsed = parseVerifierDecision(verifierOutput);
+      let finalContract = buildFinalContract({
+        content: parsed.summary,
+        decision: parsed.decision,
+        commandResult
+      });
+      if (parsed.decision === "pass" && contractHasFailedCriteria(finalContract)) {
+        parsed = {
+          decision: "needs_fix",
+          summary: [
+            "Verifier pass was downgraded by the evidence contract guardrail.",
+            "At least one acceptance criterion failed, usually a failed verification command.",
+            parsed.summary
+          ].join("\n")
+        };
+        finalContract = buildFinalContract({
+          content: parsed.summary,
+          decision: parsed.decision,
+          commandResult
+        });
+      }
       if (testerWorkspace) {
         await cleanupSpecificWorktree({
           targetProjectPath: task.targetProjectPath,
@@ -582,13 +877,12 @@ export async function processTask(taskId: string, signal?: AbortSignal): Promise
       });
 
       if (parsed.decision === "pass") {
-        const mergeResult = await mergeIntoIntegration({
+        const reviewBranch = await createOrUpdateReviewBranch({
           targetProjectPath: task.targetProjectPath,
           sourceRef: implementerWorkspace.branchName || implementationCommit.ref,
-          taskId,
-          taskTitle: refreshedTask.title
+          taskId
         });
-        updateTask(taskId, { status: "done", failureReason: null, worktreePath: mergeResult.path });
+        updateTask(taskId, { status: "ready_for_review", failureReason: null, worktreePath: projectPath });
         brokerArtifact({
           taskId,
           round,
@@ -597,19 +891,22 @@ export async function processTask(taskId: string, signal?: AbortSignal): Promise
           content: [
             parsed.summary,
             "",
-            "INTEGRATION MERGE",
-            `Branch: ${mergeResult.branchName}`,
-            `Worktree: ${mergeResult.path}`,
-            mergeResult.output
-          ].join("\n")
+            "READY FOR REVIEW",
+            `Branch: ${reviewBranch.branchName}`,
+            `Implementation ref: ${implementationCommit.ref}`,
+            `Review ref: ${reviewBranch.ref}`,
+            reviewBranch.checkoutCommand ? `Checkout: ${reviewBranch.checkoutCommand}` : "",
+            reviewBranch.output
+          ].join("\n"),
+          contract: finalContract
         });
         await cleanupSingleTaskWorktrees({
           task: {
             ...refreshedTask,
-            status: "done"
+            status: "ready_for_review"
           }
         });
-        finalStatus = "done";
+        finalStatus = "ready_for_review";
         return;
       }
       brokerBrief = brokerArtifact({
@@ -617,7 +914,8 @@ export async function processTask(taskId: string, signal?: AbortSignal): Promise
         round,
         sourceRole: "verifier",
         kind: "final_brief",
-        content: parsed.summary
+        content: parsed.summary,
+        contract: finalContract
       });
       if (parsed.decision === "blocked" || round === rounds) {
         updateTask(taskId, {

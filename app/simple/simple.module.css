@@ -715,6 +715,10 @@
   background: #56b6f0;
 }
 
+.status-ready_for_review {
+  background: #52d0d9;
+}
+
 .status-done {
   background: #6bd483;
 }
@@ -799,6 +803,30 @@
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 12px;
   line-height: 1.55;
+}
+
+.contractBox {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0;
+  padding: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #dcd8cb;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.contractBox strong {
+  color: #f3efe3;
+}
+
+.contractBox ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
 }
 
 .plannerCard pre::-webkit-scrollbar,

@@ -573,6 +573,51 @@ button {
   cursor: pointer;
 }
 
+.evidence-contract {
+  display: grid;
+  gap: 10px;
+  margin: 10px 0;
+  padding: 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfbf8;
+  color: #38414a;
+}
+
+.contract-summary {
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.evidence-contract section {
+  display: grid;
+  gap: 5px;
+}
+
+.evidence-contract h4 {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.evidence-contract ul {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.evidence-contract li {
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.evidence-contract li span,
+.evidence-contract li em {
+  color: var(--muted);
+}
+
 .path-suggestions {
   position: absolute;
   left: 0;
@@ -1187,6 +1232,11 @@ button {
 .pill.waiting_for_user {
   background: #efe7ff;
   color: #53358c;
+}
+
+.pill.ready_for_review {
+  background: #dff2ff;
+  color: #0f5475;
 }
 
 .pill.done {

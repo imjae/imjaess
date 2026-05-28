@@ -21,6 +21,7 @@ const TASK_STATUSES: TaskStatus[] = [
   "verifying",
   "waiting_for_user",
   "needs_fix",
+  "ready_for_review",
   "done",
   "blocked",
   "canceled"

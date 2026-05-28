@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import Database from "better-sqlite3";
 import type { Database as DatabaseType } from "better-sqlite3";
 import { nowIso } from "@/lib/time";
+import { parseEvidenceContractJson, serializeEvidenceContract } from "@/lib/evidence-contract";
 import type {
   AgentRole,
   AgentRun,
@@ -208,13 +209,14 @@ function migrate(database: DatabaseType): void {
       FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
     );
 
-    CREATE TABLE IF NOT EXISTS broker_artifacts (
+  CREATE TABLE IF NOT EXISTS broker_artifacts (
       id TEXT PRIMARY KEY,
       task_id TEXT NOT NULL,
       round INTEGER NOT NULL,
       source_role TEXT NOT NULL,
       kind TEXT NOT NULL,
       content TEXT NOT NULL,
+      contract_json TEXT,
       created_at TEXT NOT NULL,
       FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
     );
@@ -302,6 +304,12 @@ function migrate(database: DatabaseType): void {
   }
   if (!taskColumnNames.has("base_branch")) {
     database.exec("ALTER TABLE tasks ADD COLUMN base_branch TEXT;");
+  }
+  const brokerArtifactColumnNames = new Set(
+    (database.prepare("PRAGMA table_info(broker_artifacts)").all() as Array<{ name: string }>).map((column) => column.name)
+  );
+  if (!brokerArtifactColumnNames.has("contract_json")) {
+    database.exec("ALTER TABLE broker_artifacts ADD COLUMN contract_json TEXT;");
   }
   database.exec(`
     INSERT OR IGNORE INTO task_groups (name, created_at, updated_at)
@@ -467,6 +475,7 @@ function mapBrokerArtifact(row: Record<string, unknown>): BrokerArtifact {
     sourceRole: String(row.source_role) as BrokerArtifact["sourceRole"],
     kind: String(row.kind) as BrokerArtifact["kind"],
     content: String(row.content),
+    contract: parseEvidenceContractJson(row.contract_json),
     createdAt: String(row.created_at)
   };
 }
@@ -1231,6 +1240,7 @@ export function insertBrokerArtifact(input: {
   sourceRole: BrokerArtifact["sourceRole"];
   kind: BrokerArtifact["kind"];
   content: string;
+  contract?: BrokerArtifact["contract"];
 }): BrokerArtifact {
   const artifact: BrokerArtifact = {
     id: randomUUID(),
@@ -1239,11 +1249,12 @@ export function insertBrokerArtifact(input: {
     sourceRole: input.sourceRole,
     kind: input.kind,
     content: input.content,
+    contract: input.contract || null,
     createdAt: nowIso()
   };
   getDb()
     .prepare(
-      "INSERT INTO broker_artifacts (id, task_id, round, source_role, kind, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+      "INSERT INTO broker_artifacts (id, task_id, round, source_role, kind, content, contract_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
     )
     .run(
       artifact.id,
@@ -1252,6 +1263,7 @@ export function insertBrokerArtifact(input: {
       artifact.sourceRole,
       artifact.kind,
       artifact.content,
+      serializeEvidenceContract(artifact.contract),
       artifact.createdAt
     );
   return artifact;

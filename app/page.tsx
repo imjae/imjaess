@@ -121,12 +121,15 @@ const UI_TEXT = {
     planMode: "Plan",
     previewExport: "Preview Export",
     rawDetails: "Raw details",
+    readyForReview: "Ready for review",
     reason: "Reason",
     reasoningEffort: "Reasoning",
     refreshTasks: "Refresh tasks",
     round: "Round",
     rule: "Rule",
     ruleTarget: "Rule target",
+    reviewBranch: "Review branch",
+    reviewCheckout: "Checkout command",
     researchPlanningRule: "Research / planning",
     implementationRule: "Implementation",
     run: "Run",
@@ -232,12 +235,15 @@ const UI_TEXT = {
     parallelTasks: "병렬 Task",
     pendingImages: "Task 시작 시 첨부할 이미지",
     previewExport: "내보내기 미리보기",
+    readyForReview: "검토 대기",
     reason: "이유",
     reasoningEffort: "추론 강도",
     refreshTasks: "Task 새로고침",
     round: "라운드",
     rule: "규칙",
     ruleTarget: "규칙 대상",
+    reviewBranch: "검토 브랜치",
+    reviewCheckout: "체크아웃 명령",
     researchPlanningRule: "조사 / 계획",
     implementationRule: "구현",
     run: "실행",
@@ -348,6 +354,7 @@ function statusLabel(status: Task["status"], language: UiLanguage): string {
       verifying: "Verifying",
       waiting_for_user: "Waiting",
       needs_fix: "Needs Fix",
+      ready_for_review: "Ready",
       done: "Done",
       blocked: "Blocked",
       canceled: "Canceled"
@@ -359,12 +366,25 @@ function statusLabel(status: Task["status"], language: UiLanguage): string {
       verifying: "검증 중",
       waiting_for_user: "답변 대기",
       needs_fix: "수정 필요",
+      ready_for_review: "검토 대기",
       done: "완료",
       blocked: "차단됨",
       canceled: "중단됨"
     }
   };
   return labels[language][status];
+}
+
+function safeRefPart(value: string): string {
+  return value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "item";
+}
+
+function reviewBranchName(taskId: string): string {
+  return `harness/review/${safeRefPart(taskId)}`;
+}
+
+function reviewCheckoutCommand(taskId: string): string {
+  return `git checkout ${reviewBranchName(taskId)}`;
 }
 
 function taskTagsOf(task: Pick<Task, "taskGroup" | "tags">): string[] {
@@ -738,6 +758,7 @@ function canDeleteTask(task: Task): boolean {
   return (
     task.status === "queued" ||
     task.status === "waiting_for_user" ||
+    task.status === "ready_for_review" ||
     task.status === "done" ||
     task.status === "blocked" ||
     task.status === "canceled"
@@ -1002,6 +1023,7 @@ export default function HomePage(): React.ReactElement {
         ["queued", "running", "reviewing", "verifying", "waiting_for_user", "needs_fix"].includes(task.status)
       ).length,
       done: tasks.filter((task) => task.status === "done").length,
+      readyForReview: tasks.filter((task) => task.status === "ready_for_review").length,
       blocked: tasks.filter((task) => task.status === "blocked").length,
       notes: notes.length
     };
@@ -1961,6 +1983,10 @@ export default function HomePage(): React.ReactElement {
               <strong>{metrics.done}</strong>
             </div>
             <div className="metric">
+              <span>{tr(language, "readyForReview")}</span>
+              <strong>{metrics.readyForReview}</strong>
+            </div>
+            <div className="metric">
               <span>{tr(language, "blocked")}</span>
               <strong>{metrics.blocked}</strong>
             </div>
@@ -2597,6 +2623,23 @@ function ScopeImageAttachments(props: {
   );
 }
 
+function ReviewBranchNotice(props: { task: TaskDetail; language: UiLanguage }): React.ReactElement | null {
+  if (props.task.status !== "ready_for_review") {
+    return null;
+  }
+  const branchName = reviewBranchName(props.task.id);
+  return (
+    <div className="notice-line">
+      <div>
+        <strong>{tr(props.language, "reviewBranch")}:</strong> {branchName}
+      </div>
+      <div>
+        <strong>{tr(props.language, "reviewCheckout")}:</strong> <code>{reviewCheckoutCommand(props.task.id)}</code>
+      </div>
+    </div>
+  );
+}
+
 function TaskSummaryPanel(props: {
   language: UiLanguage;
   task: TaskDetail;
@@ -2635,6 +2678,7 @@ function TaskSummaryPanel(props: {
       ) : latestEvent ? (
         <div className="notice-line">{latestEvent.title}</div>
       ) : null}
+      <ReviewBranchNotice task={props.task} language={props.language} />
       {props.task.failureReason ? <div className="error-text">{friendlyFailureReason(props.task.failureReason, props.language)}</div> : null}
       <div className="workspace-path">{props.task.worktreePath || props.task.targetProjectPath}</div>
       <div className="button-row">
@@ -2747,6 +2791,7 @@ function TaskDetailView(props: {
         <p style={{ margin: 0, color: "var(--muted)", lineHeight: 1.5 }}>{props.task.goal}</p>
       </div>
       {props.task.failureReason ? <div className="error-text">{friendlyFailureReason(props.task.failureReason, props.language)}</div> : null}
+      <ReviewBranchNotice task={props.task} language={props.language} />
       <div className="workspace-path">{props.task.worktreePath || props.task.targetProjectPath}</div>
 
       {shouldAnswerPlanner ? (
@@ -3044,9 +3089,73 @@ function BrokerArtifacts({ language, artifacts }: { language: UiLanguage; artifa
             </span>
             <span>{artifact.createdAt}</span>
           </header>
+          {artifact.contract ? <EvidenceContractView artifact={artifact} /> : null}
           <pre>{artifact.content}</pre>
         </div>
       ))}
+    </div>
+  );
+}
+
+function EvidenceContractView({ artifact }: { artifact: BrokerArtifact }): React.ReactElement | null {
+  const contract = artifact.contract;
+  if (!contract) {
+    return null;
+  }
+  return (
+    <div className="evidence-contract">
+      <div className="contract-summary">{contract.summary}</div>
+      {contract.claims.length > 0 ? (
+        <section>
+          <h4>Claims</h4>
+          <ul>
+            {contract.claims.map((claim) => (
+              <li key={claim.id}>
+                <strong>{claim.id}</strong> <span>{claim.confidence}</span> {claim.text}
+                {claim.evidenceIds.length > 0 ? <em> evidence: {claim.evidenceIds.join(", ")}</em> : null}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+      {contract.evidence.length > 0 ? (
+        <section>
+          <h4>Evidence</h4>
+          <ul>
+            {contract.evidence.map((evidence) => (
+              <li key={evidence.id}>
+                <strong>{evidence.id}</strong> <span>{evidence.type}</span> {evidence.reference}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+      {contract.acceptanceCriteriaStatus.length > 0 ? (
+        <section>
+          <h4>Acceptance Criteria</h4>
+          <ul>
+            {contract.acceptanceCriteriaStatus.map((criterion) => (
+              <li key={`${criterion.criterion}-${criterion.status}`}>
+                <strong>{criterion.status}</strong> {criterion.criterion}
+                {criterion.notes ? <em> {criterion.notes}</em> : null}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+      {contract.unverifiedAssumptions.length > 0 || contract.residualRisks.length > 0 ? (
+        <section>
+          <h4>Open Items</h4>
+          <ul>
+            {contract.unverifiedAssumptions.map((item) => (
+              <li key={`assumption-${item}`}>Assumption: {item}</li>
+            ))}
+            {contract.residualRisks.map((item) => (
+              <li key={`risk-${item}`}>Risk: {item}</li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
     </div>
   );
 }

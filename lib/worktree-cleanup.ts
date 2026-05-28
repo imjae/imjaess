@@ -69,6 +69,10 @@ function taskBranchPrefixes(taskId: string): string[] {
   return [`harness/${safeTaskId}/`, `harness/${safeTaskId}`];
 }
 
+function isReviewBranch(branchName: string): boolean {
+  return branchName.startsWith("harness/review/");
+}
+
 function taskIsExpiredBlocked(task: Task, nowMs: number): boolean {
   if (task.status !== "blocked") {
     return false;
@@ -78,7 +82,7 @@ function taskIsExpiredBlocked(task: Task, nowMs: number): boolean {
 
 function taskMatchesMode(task: Task, mode: WorktreeCleanupMode, nowMs: number): boolean {
   if (mode === "completed") {
-    return task.status === "done";
+    return task.status === "done" || task.status === "ready_for_review";
   }
   if (mode === "failed") {
     return task.status === "blocked" || task.status === "needs_fix" || task.status === "canceled";
@@ -218,6 +222,9 @@ async function cleanupProjectBranches(repoRoot: string, tasks: Task[], summary: 
   const protectedTaskIds = new Set(tasks.filter((task) => ACTIVE_STATUSES.has(task.status)).map((task) => safeRefPart(task.id)));
   const branches = await harnessBranches(repoRoot);
   for (const branch of branches) {
+    if (isReviewBranch(branch)) {
+      continue;
+    }
     const match = /^harness\/([^/]+)/.exec(branch);
     if (match && protectedTaskIds.has(match[1])) {
       continue;
@@ -336,7 +343,7 @@ export async function cleanupSpecificWorktree(input: {
     summary.errors.push(error instanceof Error ? error.message : String(error));
   }
 
-  if (input.branchName?.startsWith("harness/")) {
+  if (input.branchName?.startsWith("harness/") && !isReviewBranch(input.branchName)) {
     try {
       await git(["branch", "-D", input.branchName], repoRoot);
       summary.removedBranches.push(input.branchName);

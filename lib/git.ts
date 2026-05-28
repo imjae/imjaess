@@ -84,6 +84,10 @@ export function integrationBranchName(): string {
   return process.env.HARNESS_INTEGRATION_BRANCH || "imjae";
 }
 
+export function reviewBranchName(taskId: string): string {
+  return `harness/review/${safeRefPart(taskId)}`;
+}
+
 export async function createTaskWorkspace(taskId: string, targetProjectPath: string): Promise<{
   path: string;
   kind: "worktree" | "direct";
@@ -212,6 +216,38 @@ export async function commitWorkspaceChanges(workspacePath: string, message: str
     committed: true,
     ref,
     summary
+  };
+}
+
+export async function createOrUpdateReviewBranch(input: {
+  targetProjectPath: string;
+  sourceRef: string;
+  taskId: string;
+}): Promise<{
+  branchName: string;
+  ref: string;
+  checkoutCommand: string;
+  output: string;
+}> {
+  const projectPath = path.resolve(input.targetProjectPath);
+  if (!(await isGitRepository(projectPath))) {
+    return {
+      branchName: "",
+      ref: input.sourceRef,
+      checkoutCommand: "",
+      output: "No review branch created: target project is not a git repository."
+    };
+  }
+
+  const root = await gitRoot(projectPath);
+  const branchName = reviewBranchName(input.taskId);
+  await git(["branch", "-f", branchName, input.sourceRef], root);
+  const ref = await git(["rev-parse", branchName], root);
+  return {
+    branchName,
+    ref,
+    checkoutCommand: `git checkout ${branchName}`,
+    output: `Review branch ${branchName} now points to ${ref}.`
   };
 }
 

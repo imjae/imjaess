@@ -70,6 +70,16 @@ describe("taskReportMarkdown", () => {
           sourceRole: "researcher",
           kind: "evidence_pack",
           content: "Approved evidence",
+          contract: {
+            version: "1",
+            kind: "evidence_pack",
+            summary: "Structured evidence",
+            claims: [{ id: "claim-1", text: "Inventory entry point found.", confidence: "high", evidenceIds: ["ev-1"] }],
+            evidence: [{ id: "ev-1", type: "file", reference: "lib/inventory.ts:12" }],
+            unverifiedAssumptions: [],
+            residualRisks: [],
+            acceptanceCriteriaStatus: [{ criterion: "Evidence captured", status: "pass", evidenceIds: ["ev-1"] }]
+          },
           createdAt: "2026-05-21T00:00:10.000Z"
         }
       ],
@@ -94,6 +104,8 @@ describe("taskReportMarkdown", () => {
     expect(markdown).toContain("Planning Mode: direct");
     expect(markdown).toContain("Verification Mode: fast");
     expect(markdown).toContain("effect.png");
+    expect(markdown).toContain("Structured evidence");
+    expect(markdown).toContain("Inventory entry point found.");
     expect(markdown).toContain("Approved evidence");
     expect(markdown).toContain("Passed verification.");
     expect(markdown).not.toContain("private raw output");
