@@ -36,6 +36,7 @@ import type {
   Verification
 } from "@/lib/types";
 import { repositoryName } from "@/lib/repository-name";
+import { deriveTaskOutcomeReason, type TaskOutcomeReason } from "@/lib/task-outcome-reason";
 import styles from "./simple.module.css";
 
 const defaultProjectPath = "D:\\dev\\Deluge";
@@ -219,6 +220,40 @@ function latestArtifact(task: TaskDetail | null, kind: BrokerArtifact["kind"]): 
 
 function latestVerification(task: TaskDetail): Verification | null {
   return [...task.verifications].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] || null;
+}
+
+function outcomeReasonTitle(reason: TaskOutcomeReason): string {
+  const labels: Record<TaskOutcomeReason["kind"], string> = {
+    review_gate: "완료되지 않은 이유",
+    waiting_for_user: "대기 중인 이유",
+    needs_fix: "수정이 필요한 이유",
+    blocked: "차단된 이유",
+    canceled: "중단된 이유",
+    agent_failed: "Agent 실행 실패",
+    shell_failed: "검증 명령 실패"
+  };
+  return labels[reason.kind];
+}
+
+function outcomeReasonSource(reason: TaskOutcomeReason): string {
+  const labels: Record<TaskOutcomeReason["source"], string> = {
+    task: "Task 상태",
+    verifier: "Verifier 판단",
+    broker: "Broker artifact",
+    agent: "Agent 실행 로그",
+    shell: "Shell 로그"
+  };
+  return labels[reason.source];
+}
+
+function outcomeReasonBody(reason: TaskOutcomeReason): string {
+  if (reason.kind === "review_gate") {
+    return `검증은 통과했지만 자동 완료/병합 대신 수동 검토 브랜치 확인 단계에서 멈춘 상태입니다.\n${reason.summary}`;
+  }
+  if (reason.kind === "waiting_for_user") {
+    return `Planner가 구현 전에 사용자 답변을 기다리고 있습니다.\n${reason.summary}`;
+  }
+  return reason.summary;
 }
 
 function canCancelTask(task: Task): boolean {
@@ -1092,6 +1127,7 @@ function TaskConversationItem(props: {
           </div>
         </div>
         <AgentRunRail runs={props.task.agentRuns} />
+        <OutcomeReasonCard task={props.task} />
         {props.task.status === "waiting_for_user" && props.plannerQuestions ? (
           <div className={styles.plannerCard}>
             <CircleAlert size={16} aria-hidden="true" />
@@ -1149,6 +1185,37 @@ function TaskConversationItem(props: {
         {verification ? <VerificationSummary verification={verification} /> : null}
       </div>
     </article>
+  );
+}
+
+function OutcomeReasonCard(props: { task: TaskDetail }): React.ReactElement | null {
+  const reason = deriveTaskOutcomeReason(props.task);
+  if (!reason) {
+    return null;
+  }
+  const Icon = reason.tone === "success" ? ShieldCheck : CircleAlert;
+  const detail = reason.detail && reason.detail.trim() !== reason.summary.trim() ? reason.detail : "";
+  return (
+    <div className={classNames(styles.outcomeCard, styles[`outcome-${reason.tone}`])}>
+      <Icon size={16} aria-hidden="true" />
+      <div className={styles.summaryBody}>
+        <strong>{outcomeReasonTitle(reason)}</strong>
+        <span>{outcomeReasonSource(reason)}</span>
+        <p>{trimText(outcomeReasonBody(reason), 900)}</p>
+        {reason.command ? (
+          <code>
+            {reason.command}
+            {reason.exitCode !== null && reason.exitCode !== undefined ? ` (exit ${reason.exitCode})` : ""}
+          </code>
+        ) : null}
+        {detail ? (
+          <details className={styles.outcomeEvidence}>
+            <summary>근거 보기</summary>
+            <pre>{trimText(detail, 1200)}</pre>
+          </details>
+        ) : null}
+      </div>
+    </div>
   );
 }
 

@@ -779,6 +779,87 @@
   color: #ffd89a;
 }
 
+.outcomeCard {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  padding: 11px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.045);
+  color: #d7d4cc;
+}
+
+.outcome-success {
+  border-color: rgba(107, 212, 131, 0.28);
+  background: rgba(107, 212, 131, 0.1);
+  color: #baf1c7;
+}
+
+.outcome-warning {
+  border-color: rgba(241, 178, 68, 0.28);
+  background: rgba(241, 178, 68, 0.1);
+  color: #ffd89a;
+}
+
+.outcome-danger {
+  border-color: rgba(255, 111, 111, 0.28);
+  background: rgba(255, 111, 111, 0.1);
+  color: #ffb0ad;
+}
+
+.outcomeCard span {
+  display: block;
+  margin-bottom: 5px;
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.outcomeCard p {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.outcomeCard code {
+  display: inline-block;
+  max-width: 100%;
+  margin-top: 8px;
+  padding: 4px 7px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.24);
+  color: #f0f0eb;
+  overflow-wrap: anywhere;
+}
+
+.outcomeEvidence {
+  margin-top: 9px;
+}
+
+.outcomeEvidence summary {
+  cursor: pointer;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.outcomeEvidence pre {
+  margin: 8px 0 0;
+  max-height: var(--agent-summary-height, 260px);
+  overflow: auto;
+  scrollbar-color: rgba(202, 202, 196, 0.3) transparent;
+  scrollbar-width: thin;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: inherit;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
 .summaryBody {
   min-width: 0;
   flex: 1;

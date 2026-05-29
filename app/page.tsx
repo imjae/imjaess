@@ -42,6 +42,7 @@ import type {
 } from "@/lib/types";
 import type { ModelOption } from "@/lib/model-catalog";
 import { repositoryName } from "@/lib/repository-name";
+import { deriveTaskOutcomeReason, type TaskOutcomeReason } from "@/lib/task-outcome-reason";
 
 type Tab = "agents" | "artifacts" | "shell" | "verifications" | "conventions";
 type UiLanguage = "ko" | "en";
@@ -2671,6 +2672,68 @@ function ReviewBranchNotice(props: { task: TaskDetail; language: UiLanguage }): 
   );
 }
 
+function outcomeReasonTitle(reason: TaskOutcomeReason, language: UiLanguage): string {
+  const labels: Record<TaskOutcomeReason["kind"], Record<UiLanguage, string>> = {
+    review_gate: { ko: "완료되지 않은 이유", en: "Why this is not done" },
+    waiting_for_user: { ko: "대기 중인 이유", en: "Why this is waiting" },
+    needs_fix: { ko: "수정이 필요한 이유", en: "Why this needs fixes" },
+    blocked: { ko: "차단된 이유", en: "Why this is blocked" },
+    canceled: { ko: "중단된 이유", en: "Why this was canceled" },
+    agent_failed: { ko: "Agent 실행 실패", en: "Agent failure" },
+    shell_failed: { ko: "검증 명령 실패", en: "Verification command failure" }
+  };
+  return labels[reason.kind][language];
+}
+
+function outcomeReasonSource(reason: TaskOutcomeReason, language: UiLanguage): string {
+  const labels: Record<TaskOutcomeReason["source"], Record<UiLanguage, string>> = {
+    task: { ko: "Task 상태", en: "Task state" },
+    verifier: { ko: "Verifier 판단", en: "Verifier decision" },
+    broker: { ko: "Broker artifact", en: "Broker artifact" },
+    agent: { ko: "Agent 실행 로그", en: "Agent run log" },
+    shell: { ko: "Shell 로그", en: "Shell log" }
+  };
+  return labels[reason.source][language];
+}
+
+function outcomeReasonBody(reason: TaskOutcomeReason, language: UiLanguage): string {
+  if (reason.kind === "review_gate") {
+    const reviewText =
+      language === "ko"
+        ? "검증은 통과했지만 자동 완료/병합 대신 수동 검토 브랜치 확인 단계에서 멈춘 상태입니다."
+        : "Verification passed, but the task stops at the manual review branch gate instead of being marked done or merged automatically.";
+    return `${reviewText}\n${localizedAgentOutput(reason.summary, language)}`;
+  }
+  if (reason.kind === "waiting_for_user") {
+    const waitingText =
+      language === "ko"
+        ? "Planner가 구현 전에 사용자 답변을 기다리고 있습니다."
+        : "Planner is waiting for a user answer before implementation can continue.";
+    return `${waitingText}\n${localizedAgentOutput(reason.summary, language)}`;
+  }
+  return friendlyFailureReason(reason.summary, language);
+}
+
+function TaskOutcomeReasonNotice(props: { task: TaskDetail; language: UiLanguage }): React.ReactElement | null {
+  const reason = deriveTaskOutcomeReason(props.task);
+  if (!reason) {
+    return null;
+  }
+  return (
+    <div className={`notice-line outcome-reason ${reason.tone}`}>
+      <strong>{outcomeReasonTitle(reason, props.language)}</strong>
+      <span>{outcomeReasonSource(reason, props.language)}</span>
+      <p>{outcomeReasonBody(reason, props.language)}</p>
+      {reason.command ? (
+        <code>
+          {reason.command}
+          {reason.exitCode !== null && reason.exitCode !== undefined ? ` (exit ${reason.exitCode})` : ""}
+        </code>
+      ) : null}
+    </div>
+  );
+}
+
 function TaskSummaryPanel(props: {
   language: UiLanguage;
   task: TaskDetail;
@@ -2709,8 +2772,8 @@ function TaskSummaryPanel(props: {
       ) : latestEvent ? (
         <div className="notice-line">{latestEvent.title}</div>
       ) : null}
+      <TaskOutcomeReasonNotice task={props.task} language={props.language} />
       <ReviewBranchNotice task={props.task} language={props.language} />
-      {props.task.failureReason ? <div className="error-text">{friendlyFailureReason(props.task.failureReason, props.language)}</div> : null}
       <div className="workspace-path">{props.task.worktreePath || props.task.targetProjectPath}</div>
       <div className="button-row">
         <button className="btn primary" onClick={props.openDetail} type="button">
@@ -2821,7 +2884,7 @@ function TaskDetailView(props: {
         <h2 style={{ margin: "0 0 6px", fontSize: 18 }}>{props.task.title}</h2>
         <p style={{ margin: 0, color: "var(--muted)", lineHeight: 1.5 }}>{props.task.goal}</p>
       </div>
-      {props.task.failureReason ? <div className="error-text">{friendlyFailureReason(props.task.failureReason, props.language)}</div> : null}
+      <TaskOutcomeReasonNotice task={props.task} language={props.language} />
       <ReviewBranchNotice task={props.task} language={props.language} />
       <div className="workspace-path">{props.task.worktreePath || props.task.targetProjectPath}</div>
       <AppliedRulesPanel language={props.language} notes={props.notes} projectPath={props.task.targetProjectPath} />
