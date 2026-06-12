@@ -175,7 +175,8 @@ export interface Verification {
 export interface ConventionNote {
   id: string;
   projectPath: string;
-  ruleTarget: "research_planning" | "implementation";
+  ruleTarget: string;
+  agentTargets: AgentRole[];
   category: string;
   rule: string;
   reason: string;

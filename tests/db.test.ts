@@ -20,6 +20,7 @@ import {
   listTaskTags,
   replaceTaskTags,
   resetDbForTests,
+  updateConventionNote,
   updateNotionSettings,
   updateTask,
   upsertImportedTask,
@@ -137,10 +138,10 @@ describe("task persistence", () => {
     expect(artifact?.contract?.claims[0]?.evidenceIds).toEqual(["ev-1"]);
   });
 
-  it("stores convention notes by rule target", () => {
+  it("stores convention notes by agent targets with legacy rule target compatibility", () => {
     createConventionNote({
       projectPath: "C:\\repo",
-      ruleTarget: "research_planning",
+      agentTargets: ["researcher", "planner", "verifier"],
       category: "Agent flow",
       rule: "조사 근거를 먼저 확인한다.",
       reason: "계획 편향을 줄이기 위해서다.",
@@ -159,10 +160,47 @@ describe("task persistence", () => {
       examples: ""
     });
 
-    expect(listConventionNotes("C:\\repo").map((note) => note.ruleTarget)).toEqual([
-      "implementation",
-      "research_planning"
+    expect(listConventionNotes("C:\\repo").map((note) => note.agentTargets)).toEqual([
+      ["implementer"],
+      ["researcher", "planner", "verifier"]
     ]);
+  });
+
+  it("updates convention notes", () => {
+    const note = createConventionNote({
+      projectPath: "C:\\repo",
+      agentTargets: ["researcher"],
+      category: "VFX",
+      rule: "Check the effect pool first.",
+      reason: "",
+      source: "manual",
+      confidence: "medium",
+      examples: ""
+    });
+
+    const updated = updateConventionNote({
+      id: note.id,
+      projectPath: "C:\\repo",
+      agentTargets: ["implementer", "verifier"],
+      category: "Effect / VFX",
+      rule: "Trace the runtime effect path before editing assets.",
+      reason: "Assets can exist without being registered in a pool.",
+      source: "manual",
+      confidence: "high",
+      examples: "Check pool presets and animation events."
+    });
+
+    expect(updated).toMatchObject({
+      id: note.id,
+      agentTargets: ["implementer", "verifier"],
+      category: "Effect / VFX",
+      rule: "Trace the runtime effect path before editing assets.",
+      confidence: "high"
+    });
+    expect(listConventionNotes("C:\\repo")[0]).toMatchObject({
+      id: note.id,
+      agentTargets: ["implementer", "verifier"]
+    });
   });
 
   it("can clear a saved project verification command", () => {

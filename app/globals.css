@@ -580,6 +580,10 @@ button {
   min-height: 76px;
 }
 
+.field textarea.rule-textarea {
+  min-height: 132px;
+}
+
 .scope-reference-field {
   position: relative;
   display: grid;
@@ -1039,6 +1043,12 @@ button {
 .checkbox-row input {
   width: 16px;
   height: 16px;
+}
+
+.agent-target-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px;
 }
 
 .button-row {

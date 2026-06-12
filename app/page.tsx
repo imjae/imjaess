@@ -30,6 +30,7 @@ import {
   Upload
 } from "lucide-react";
 import type {
+  AgentRole,
   AgentRun,
   AgentSetting,
   BrokerArtifact,
@@ -46,6 +47,8 @@ import { deriveTaskOutcomeReason, type TaskOutcomeReason } from "@/lib/task-outc
 
 type Tab = "agents" | "artifacts" | "shell" | "verifications" | "conventions";
 type UiLanguage = "ko" | "en";
+
+const agentRuleTargets: AgentRole[] = ["researcher", "planner", "implementer", "tester", "verifier"];
 
 const defaultProjectPath = "D:\\dev\\Deluge";
 const LANGUAGE_STORAGE_KEY = "oh-my-codex-language";
@@ -128,6 +131,9 @@ const UI_TEXT = {
     refreshTasks: "Refresh tasks",
     round: "Round",
     rule: "Rule",
+    editRule: "Edit",
+    cancelEdit: "Cancel edit",
+    updateRule: "Update rule",
     ruleTarget: "Rule target",
     reviewBranch: "Review branch",
     reviewCheckout: "Checkout command",
@@ -670,8 +676,29 @@ function confidenceLabel(confidence: ConventionNote["confidence"], language: UiL
   return labels[language][confidence];
 }
 
-function ruleTargetLabel(ruleTarget: ConventionNote["ruleTarget"], language: UiLanguage): string {
-  return ruleTarget === "research_planning" ? tr(language, "researchPlanningRule") : tr(language, "implementationRule");
+function agentRuleTargetLabel(role: AgentRole, language: UiLanguage): string {
+  const labels: Record<UiLanguage, Record<AgentRole, string>> = {
+    en: {
+      researcher: "Researcher",
+      planner: "Planner",
+      implementer: "Implementer",
+      tester: "Tester",
+      verifier: "Verifier"
+    },
+    ko: {
+      researcher: "Researcher",
+      planner: "Planner",
+      implementer: "Implementer",
+      tester: "Tester",
+      verifier: "Verifier"
+    }
+  };
+  return labels[language][role];
+}
+
+function ruleTargetLabel(note: ConventionNote, language: UiLanguage): string {
+  const targets = note.agentTargets.length > 0 ? note.agentTargets : ["implementer" as AgentRole];
+  return targets.map((role) => agentRuleTargetLabel(role, language)).join(", ");
 }
 
 function tabLabels(language: UiLanguage): Array<{ id: Tab; label: string; icon: React.ReactElement }> {
@@ -875,7 +902,7 @@ export default function HomePage(): React.ReactElement {
 
   const [noteForm, setNoteForm] = useState({
     projectPath: defaultProjectPath,
-    ruleTarget: "research_planning" as ConventionNote["ruleTarget"],
+    agentTargets: ["researcher", "planner"] as AgentRole[],
     category: "Unity C#",
     rule: "",
     reason: "",
@@ -883,6 +910,7 @@ export default function HomePage(): React.ReactElement {
     confidence: "medium" as ConventionNote["confidence"],
     examples: ""
   });
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
 
   useEffect(() => {
     const savedLanguage = window.localStorage.getItem(LANGUAGE_STORAGE_KEY);
@@ -1617,11 +1645,31 @@ export default function HomePage(): React.ReactElement {
     event.preventDefault();
     setError(null);
     await jsonFetch("/api/conventions", {
-      method: "POST",
-      body: JSON.stringify(noteForm)
+      method: editingNoteId ? "PATCH" : "POST",
+      body: JSON.stringify(editingNoteId ? { ...noteForm, id: editingNoteId } : noteForm)
     });
+    setEditingNoteId(null);
     setNoteForm((current) => ({ ...current, rule: "", reason: "", examples: "" }));
     await refreshNotes();
+  }
+
+  function editNote(note: ConventionNote): void {
+    setEditingNoteId(note.id);
+    setNoteForm({
+      projectPath: note.projectPath,
+      agentTargets: note.agentTargets.length > 0 ? note.agentTargets : ["implementer"],
+      category: note.category,
+      rule: note.rule,
+      reason: note.reason,
+      source: note.source,
+      confidence: note.confidence,
+      examples: note.examples
+    });
+  }
+
+  function cancelNoteEdit(): void {
+    setEditingNoteId(null);
+    setNoteForm((current) => ({ ...current, rule: "", reason: "", examples: "" }));
   }
 
   async function exportConventions(writeFiles: boolean): Promise<void> {
@@ -1999,7 +2047,19 @@ export default function HomePage(): React.ReactElement {
               </div>
             </div>
             <div className="panel-body">
-              <AppliedRulesPanel language={language} notes={notes} projectPath={taskForm.targetProjectPath} />
+              <ConventionPanel
+                idPrefix="main-note"
+                language={language}
+                notes={notes}
+                form={noteForm}
+                setForm={setNoteForm}
+                editingNoteId={editingNoteId}
+                submitNote={submitNote}
+                editNote={editNote}
+                cancelNoteEdit={cancelNoteEdit}
+                exportConventions={exportConventions}
+                exportPreview={exportPreview}
+              />
             </div>
           </section>
         </aside>
@@ -2153,7 +2213,10 @@ export default function HomePage(): React.ReactElement {
               notes={notes}
               noteForm={noteForm}
               setNoteForm={setNoteForm}
+              editingNoteId={editingNoteId}
               submitNote={submitNote}
+              editNote={editNote}
+              cancelNoteEdit={cancelNoteEdit}
               exportConventions={exportConventions}
               exportPreview={exportPreview}
               followUpMessage={followUpMessage}
@@ -2801,7 +2864,7 @@ function TaskDetailView(props: {
   notes: ConventionNote[];
   noteForm: {
     projectPath: string;
-    ruleTarget: ConventionNote["ruleTarget"];
+    agentTargets: AgentRole[];
     category: string;
     rule: string;
     reason: string;
@@ -2811,7 +2874,7 @@ function TaskDetailView(props: {
   };
   setNoteForm: React.Dispatch<React.SetStateAction<{
     projectPath: string;
-    ruleTarget: ConventionNote["ruleTarget"];
+    agentTargets: AgentRole[];
     category: string;
     rule: string;
     reason: string;
@@ -2819,7 +2882,10 @@ function TaskDetailView(props: {
     confidence: ConventionNote["confidence"];
     examples: string;
   }>>;
+  editingNoteId: string | null;
   submitNote: (event: FormEvent) => Promise<void>;
+  editNote: (note: ConventionNote) => void;
+  cancelNoteEdit: () => void;
   exportConventions: (writeFiles: boolean) => Promise<void>;
   exportPreview: string;
   followUpMessage: string;
@@ -3067,11 +3133,15 @@ function TaskDetailView(props: {
         {props.tab === "verifications" ? <Verifications language={props.language} verifications={props.task.verifications} /> : null}
         {props.tab === "conventions" ? (
           <ConventionPanel
+            idPrefix="detail-note"
             language={props.language}
             notes={props.notes}
             form={props.noteForm}
             setForm={props.setNoteForm}
+            editingNoteId={props.editingNoteId}
             submitNote={props.submitNote}
+            editNote={props.editNote}
+            cancelNoteEdit={props.cancelNoteEdit}
             exportConventions={props.exportConventions}
             exportPreview={props.exportPreview}
           />
@@ -3087,23 +3157,18 @@ function AppliedRulesPanel(props: {
   projectPath: string;
 }): React.ReactElement {
   const projectNotes = props.notes.filter((note) => isSameProjectPath(note.projectPath, props.projectPath));
-  const implementationNotes = projectNotes.filter((note) => note.ruleTarget === "implementation");
-  const researchPlanningNotes = projectNotes.filter((note) => note.ruleTarget === "research_planning");
   const title = props.language === "ko" ? "적용 규칙" : "Applied rules";
-  const implementationTitle = props.language === "ko" ? "Implementer가 받는 규칙" : "Rules sent to implementer";
-  const researchPlanningTitle =
-    props.language === "ko" ? "Research / planning 규칙" : "Research / planning rules";
   const emptyText =
     props.language === "ko"
       ? "이 프로젝트에 기록된 규칙이 없습니다."
       : "No rules are recorded for this project.";
 
-  function renderRuleGroup(label: string, groupNotes: ConventionNote[]): React.ReactElement | null {
+  function renderRuleGroup(key: string, label: string, groupNotes: ConventionNote[]): React.ReactElement | null {
     if (groupNotes.length === 0) {
       return null;
     }
     return (
-      <section className="applied-rule-group">
+      <section className="applied-rule-group" key={key}>
         <div className="section-title">
           <span>{label}</span>
           <span className="section-count">{groupNotes.length}</span>
@@ -3137,8 +3202,15 @@ function AppliedRulesPanel(props: {
         <div className="empty compact">{emptyText}</div>
       ) : (
         <>
-          {renderRuleGroup(implementationTitle, implementationNotes)}
-          {renderRuleGroup(researchPlanningTitle, researchPlanningNotes)}
+          {agentRuleTargets.map((role) =>
+            renderRuleGroup(
+              role,
+              props.language === "ko"
+                ? `${agentRuleTargetLabel(role, props.language)}가 받는 규칙`
+                : `Rules sent to ${agentRuleTargetLabel(role, props.language)}`,
+              projectNotes.filter((note) => note.agentTargets.includes(role))
+            )
+          )}
         </>
       )}
     </section>
@@ -3412,11 +3484,12 @@ function Verifications({ language, verifications }: { language: UiLanguage; veri
 }
 
 function ConventionPanel(props: {
+  idPrefix: string;
   language: UiLanguage;
   notes: ConventionNote[];
   form: {
     projectPath: string;
-    ruleTarget: ConventionNote["ruleTarget"];
+    agentTargets: AgentRole[];
     category: string;
     rule: string;
     reason: string;
@@ -3426,7 +3499,7 @@ function ConventionPanel(props: {
   };
   setForm: React.Dispatch<React.SetStateAction<{
     projectPath: string;
-    ruleTarget: ConventionNote["ruleTarget"];
+    agentTargets: AgentRole[];
     category: string;
     rule: string;
     reason: string;
@@ -3434,25 +3507,35 @@ function ConventionPanel(props: {
     confidence: ConventionNote["confidence"];
     examples: string;
   }>>;
+  editingNoteId: string | null;
   submitNote: (event: FormEvent) => Promise<void>;
+  editNote: (note: ConventionNote) => void;
+  cancelNoteEdit: () => void;
   exportConventions: (writeFiles: boolean) => Promise<void>;
   exportPreview: string;
 }): React.ReactElement {
+  const projectPathId = `${props.idPrefix}-project-path`;
+  const ruleId = `${props.idPrefix}-rule`;
+  const categoryId = `${props.idPrefix}-category`;
+  const confidenceId = `${props.idPrefix}-confidence`;
+  const reasonId = `${props.idPrefix}-reason`;
+  const examplesId = `${props.idPrefix}-examples`;
   return (
     <div className="detail-grid">
       <form className="form-grid" onSubmit={(event) => void props.submitNote(event)}>
         <div className="field">
-          <label htmlFor="note-project-path">{tr(props.language, "targetProjectPath")}</label>
+          <label htmlFor={projectPathId}>{tr(props.language, "targetProjectPath")}</label>
           <input
-            id="note-project-path"
+            id={projectPathId}
             value={props.form.projectPath}
             onChange={(event) => props.setForm((current) => ({ ...current, projectPath: event.target.value }))}
           />
         </div>
         <div className="field">
-          <label htmlFor="note-rule">{tr(props.language, "rule")}</label>
-          <input
-            id="note-rule"
+          <label htmlFor={ruleId}>{tr(props.language, "rule")}</label>
+          <textarea
+            className="rule-textarea"
+            id={ruleId}
             value={props.form.rule}
             onChange={(event) => props.setForm((current) => ({ ...current, rule: event.target.value }))}
             placeholder={
@@ -3463,34 +3546,43 @@ function ConventionPanel(props: {
           />
         </div>
         <div className="field">
-          <label htmlFor="note-rule-target">{tr(props.language, "ruleTarget")}</label>
-          <select
-            id="note-rule-target"
-            value={props.form.ruleTarget}
-            onChange={(event) =>
-              props.setForm((current) => ({
-                ...current,
-                ruleTarget: event.target.value as ConventionNote["ruleTarget"]
-              }))
-            }
-          >
-            <option value="research_planning">{tr(props.language, "researchPlanningRule")}</option>
-            <option value="implementation">{tr(props.language, "implementationRule")}</option>
-          </select>
+          <label>{tr(props.language, "ruleTarget")}</label>
+          <div className="agent-target-grid">
+            {agentRuleTargets.map((role) => (
+              <label className="checkbox-row" key={role}>
+                <input
+                  type="checkbox"
+                  checked={props.form.agentTargets.includes(role)}
+                  onChange={(event) =>
+                    props.setForm((current) => {
+                      const nextTargets = event.target.checked
+                        ? [...current.agentTargets, role]
+                        : current.agentTargets.filter((target) => target !== role);
+                      return {
+                        ...current,
+                        agentTargets: Array.from(new Set(nextTargets))
+                      };
+                    })
+                  }
+                />
+                {agentRuleTargetLabel(role, props.language)}
+              </label>
+            ))}
+          </div>
         </div>
         <div className="split">
           <div className="field">
-            <label htmlFor="note-category">{tr(props.language, "category")}</label>
+            <label htmlFor={categoryId}>{tr(props.language, "category")}</label>
             <input
-              id="note-category"
+              id={categoryId}
               value={props.form.category}
               onChange={(event) => props.setForm((current) => ({ ...current, category: event.target.value }))}
             />
           </div>
           <div className="field">
-            <label htmlFor="note-confidence">{tr(props.language, "confidence")}</label>
+            <label htmlFor={confidenceId}>{tr(props.language, "confidence")}</label>
             <select
-              id="note-confidence"
+              id={confidenceId}
               value={props.form.confidence}
               onChange={(event) =>
                 props.setForm((current) => ({
@@ -3506,26 +3598,31 @@ function ConventionPanel(props: {
           </div>
         </div>
         <div className="field">
-          <label htmlFor="note-reason">{tr(props.language, "reason")}</label>
+          <label htmlFor={reasonId}>{tr(props.language, "reason")}</label>
           <textarea
-            id="note-reason"
+            id={reasonId}
             value={props.form.reason}
             onChange={(event) => props.setForm((current) => ({ ...current, reason: event.target.value }))}
           />
         </div>
         <div className="field">
-          <label htmlFor="note-examples">{tr(props.language, "examples")}</label>
+          <label htmlFor={examplesId}>{tr(props.language, "examples")}</label>
           <textarea
-            id="note-examples"
+            id={examplesId}
             value={props.form.examples}
             onChange={(event) => props.setForm((current) => ({ ...current, examples: event.target.value }))}
           />
         </div>
         <div className="button-row">
-          <button className="btn primary" type="submit" disabled={!props.form.rule.trim()}>
+          <button className="btn primary" type="submit" disabled={!props.form.rule.trim() || props.form.agentTargets.length === 0}>
             <Plus size={16} aria-hidden="true" />
-            {tr(props.language, "addRule")}
+            {props.editingNoteId ? tr(props.language, "updateRule") : tr(props.language, "addRule")}
           </button>
+          {props.editingNoteId ? (
+            <button className="btn" type="button" onClick={props.cancelNoteEdit}>
+              {tr(props.language, "cancelEdit")}
+            </button>
+          ) : null}
           <button className="btn" type="button" onClick={() => void props.exportConventions(false)}>
             <FileDown size={16} aria-hidden="true" />
             {tr(props.language, "previewExport")}
@@ -3545,11 +3642,16 @@ function ConventionPanel(props: {
             <div className="log-entry" key={note.id}>
               <header>
                 <span>
-                  {ruleTargetLabel(note.ruleTarget, props.language)} / {note.category} / {note.confidence}
+                  {ruleTargetLabel(note, props.language)} / {note.category} / {note.confidence}
                 </span>
                 <span>{note.source}</span>
               </header>
               <pre>{[note.rule, note.reason, note.examples].filter(Boolean).join("\n\n")}</pre>
+              <div className="button-row">
+                <button className="btn" type="button" onClick={() => props.editNote(note)}>
+                  {tr(props.language, "editRule")}
+                </button>
+              </div>
             </div>
           ))
         )}

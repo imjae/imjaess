@@ -467,6 +467,34 @@ function mapVerification(row: Record<string, unknown>): Verification {
   };
 }
 
+const AGENT_ROLES: AgentRole[] = ["researcher", "planner", "implementer", "tester", "verifier"];
+
+function normalizeConventionAgentTargets(value: unknown): AgentRole[] {
+  const raw = String(value || "").trim();
+  if (raw === "research_planning") {
+    return ["researcher", "planner"];
+  }
+  if (raw === "implementation") {
+    return ["implementer"];
+  }
+  const targets = raw
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item): item is AgentRole => AGENT_ROLES.includes(item as AgentRole));
+  return Array.from(new Set(targets));
+}
+
+function serializeConventionAgentTargets(input: {
+  ruleTarget?: string;
+  agentTargets?: AgentRole[];
+}): string {
+  const targets = Array.from(new Set((input.agentTargets || []).filter((role) => AGENT_ROLES.includes(role))));
+  if (targets.length > 0) {
+    return targets.join(",");
+  }
+  return input.ruleTarget || "implementer";
+}
+
 function mapBrokerArtifact(row: Record<string, unknown>): BrokerArtifact {
   return {
     id: String(row.id),
@@ -517,13 +545,12 @@ function mapNotionSync(row: Record<string, unknown>): NotionSync {
 }
 
 function mapConvention(row: Record<string, unknown>): ConventionNote {
+  const ruleTarget = String(row.rule_target || "implementer");
   return {
     id: String(row.id),
     projectPath: String(row.project_path),
-    ruleTarget:
-      row.rule_target === "research_planning" || row.rule_target === "implementation"
-        ? (String(row.rule_target) as ConventionNote["ruleTarget"])
-        : "implementation",
+    ruleTarget,
+    agentTargets: normalizeConventionAgentTargets(ruleTarget),
     category: String(row.category),
     rule: String(row.rule),
     reason: String(row.reason),
@@ -1282,10 +1309,16 @@ export function getBrokerArtifact(
   return row ? mapBrokerArtifact(row) : null;
 }
 
-export function createConventionNote(input: Omit<ConventionNote, "id" | "createdAt" | "updatedAt">): ConventionNote {
+export function createConventionNote(input: Omit<ConventionNote, "id" | "createdAt" | "updatedAt" | "ruleTarget" | "agentTargets"> & {
+  ruleTarget?: string;
+  agentTargets?: AgentRole[];
+}): ConventionNote {
   const timestamp = nowIso();
+  const ruleTarget = serializeConventionAgentTargets(input);
   const note: ConventionNote = {
     ...input,
+    ruleTarget,
+    agentTargets: normalizeConventionAgentTargets(ruleTarget),
     id: randomUUID(),
     createdAt: timestamp,
     updatedAt: timestamp
@@ -1299,7 +1332,7 @@ export function createConventionNote(input: Omit<ConventionNote, "id" | "created
     .run(
       note.id,
       note.projectPath,
-      note.ruleTarget,
+      ruleTarget,
       note.category,
       note.rule,
       note.reason,
@@ -1310,6 +1343,47 @@ export function createConventionNote(input: Omit<ConventionNote, "id" | "created
       note.updatedAt
     );
   return note;
+}
+
+export function updateConventionNote(input: {
+  id: string;
+  projectPath: string;
+  ruleTarget?: string;
+  agentTargets?: AgentRole[];
+  category: string;
+  rule: string;
+  reason: string;
+  source: string;
+  confidence: ConventionNote["confidence"];
+  examples: string;
+}): ConventionNote | null {
+  const timestamp = nowIso();
+  const ruleTarget = serializeConventionAgentTargets(input);
+  const result = getDb()
+    .prepare(
+      `UPDATE convention_notes
+      SET project_path = ?, rule_target = ?, category = ?, rule = ?, reason = ?, source = ?, confidence = ?, examples = ?, updated_at = ?
+      WHERE id = ?`
+    )
+    .run(
+      input.projectPath,
+      ruleTarget,
+      input.category,
+      input.rule,
+      input.reason,
+      input.source,
+      input.confidence,
+      input.examples,
+      timestamp,
+      input.id
+    );
+  if (result.changes === 0) {
+    return null;
+  }
+  const row = getDb().prepare("SELECT * FROM convention_notes WHERE id = ?").get(input.id) as
+    | Record<string, unknown>
+    | undefined;
+  return row ? mapConvention(row) : null;
 }
 
 export function listConventionNotes(projectPath?: string): ConventionNote[] {

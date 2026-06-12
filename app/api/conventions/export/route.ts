@@ -15,7 +15,8 @@ function renderConventions(projectPath: string): { agents: string; conventions: 
   const notes = listConventionNotes(projectPath);
   const grouped = new Map<string, typeof notes>();
   for (const note of notes) {
-    const key = `${note.ruleTarget}:${note.category}`;
+    const targetLabel = note.agentTargets.length > 0 ? note.agentTargets.join(", ") : "implementer";
+    const key = `${targetLabel}:${note.category}`;
     grouped.set(key, [...(grouped.get(key) || []), note]);
   }
 
@@ -26,11 +27,10 @@ function renderConventions(projectPath: string): { agents: string; conventions: 
     "",
     ...[...grouped.entries()].flatMap(([key, categoryNotes]) => {
       const [ruleTarget, category] = key.split(":", 2);
-      const targetLabel = ruleTarget === "research_planning" ? "Research And Planning" : "Implementation";
       return [
         `## ${category}`,
         "",
-        `Applies to: ${targetLabel}`,
+        `Applies to: ${ruleTarget}`,
         "",
         ...categoryNotes.flatMap((note) => [
           `- ${note.rule}`,

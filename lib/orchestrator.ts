@@ -89,15 +89,12 @@ function taskBrief(task: Task, round: number, brokerBrief: string, scopeReferenc
     .join("\n\n");
 }
 
-function conventionRuleBrief(projectPath: string, ruleTarget: "research_planning" | "implementation"): string {
-  const notes = listConventionNotes(path.resolve(projectPath)).filter((note) => note.ruleTarget === ruleTarget);
+function conventionRuleBrief(projectPath: string, role: AgentRole): string {
+  const notes = listConventionNotes(path.resolve(projectPath)).filter((note) => note.agentTargets.includes(role));
   if (notes.length === 0) {
     return "";
   }
-  const title =
-    ruleTarget === "research_planning"
-      ? "Research and planning rules for this project"
-      : "Implementation rules for this project";
+  const title = `${role} rules for this project`;
   return [
     title,
     ...notes.map((note, index) =>
@@ -510,8 +507,9 @@ export async function processTask(taskId: string, signal?: AbortSignal): Promise
       const existingPlanQuestions = isPlanModeFirstRound ? getBrokerArtifact(taskId, round, "plan_questions") : null;
       const planAnswer = isPlanModeFirstRound ? getBrokerArtifact(taskId, round, "plan_answer") : null;
       let planQuestions = brokerArtifactHandoff(existingPlanQuestions);
-      const researchPlanningRules = conventionRuleBrief(projectPath, "research_planning");
-      const implementationRules = conventionRuleBrief(projectPath, "implementation");
+      const researcherRules = conventionRuleBrief(projectPath, "researcher");
+      const plannerRules = isPlanModeFirstRound ? conventionRuleBrief(projectPath, "planner") : "";
+      const implementationRules = conventionRuleBrief(projectPath, "implementer");
       const researcherWorkspace =
         existingEvidencePack || implementationBaseRef === "HEAD"
           ? {
@@ -536,7 +534,8 @@ export async function processTask(taskId: string, signal?: AbortSignal): Promise
               taskBrief(refreshedTask, round, brokerBrief, scopeReferenceContext),
               `Your assigned workspace: ${researcherWorkspace.path}`,
               researcherWorkspace.branchName ? `Your branch: ${researcherWorkspace.branchName}` : "",
-              researchPlanningRules ? `Apply these research/planning rules:\n${researchPlanningRules}` : "",
+              researcherRules ? `Apply these researcher rules:\n${researcherRules}` : "",
+              plannerRules ? `Apply these planner rules:\n${plannerRules}` : "",
               "Plan mode uses one combined researcher/planner pass. First verify concrete repository evidence, then prepare only the user questions needed before implementation.",
               "Do not implement and do not test.",
               "Code-confirmable facts must be investigated directly instead of asked as questions.",
@@ -556,7 +555,7 @@ export async function processTask(taskId: string, signal?: AbortSignal): Promise
               taskBrief(refreshedTask, round, brokerBrief, scopeReferenceContext),
               `Your assigned workspace: ${researcherWorkspace.path}`,
               researcherWorkspace.branchName ? `Your branch: ${researcherWorkspace.branchName}` : "",
-              researchPlanningRules ? `Apply these research/planning rules:\n${researchPlanningRules}` : "",
+              researcherRules ? `Apply these researcher rules:\n${researcherRules}` : "",
               "Collect only the facts needed for this task: relevant files, likely entry points, constraints, commands, and risks.",
               "Do not implement. Do not review another agent. End with evidence that the broker can pass to an implementer."
             ]
@@ -682,7 +681,7 @@ export async function processTask(taskId: string, signal?: AbortSignal): Promise
         implementerWorkspace.branchName ? `Your branch: ${implementerWorkspace.branchName}` : "",
         `Broker evidence pack:\n${evidencePack}`,
         planBrief ? `Broker plan brief:\n${planBrief}` : "",
-        implementationRules ? `Apply these implementation rules:\n${implementationRules}` : "",
+        implementationRules ? `Apply these implementer rules:\n${implementationRules}` : "",
         "Implement only from the broker evidence pack, approved plan brief when present, and the task brief.",
         "Do not speculate about tester behavior. End with a concise private handoff summary for the broker."
       ]
@@ -778,6 +777,7 @@ export async function processTask(taskId: string, signal?: AbortSignal): Promise
 
       let testResult = "";
       if (testerWorkspace) {
+        const testerRules = conventionRuleBrief(projectPath, "tester");
         const testerOutput = await runRole({
           task: refreshedTask,
           role: "tester",
@@ -786,6 +786,7 @@ export async function processTask(taskId: string, signal?: AbortSignal): Promise
             taskBrief(refreshedTask, round, "", scopeReferenceContext),
             `Your isolated tester worktree: ${testerWorkspace.path}`,
             testerWorkspace.branchName ? `Your branch: ${testerWorkspace.branchName}` : "",
+            testerRules ? `Apply these tester rules:\n${testerRules}` : "",
             `Broker implementation brief:\n${implementationBrief}`,
             "Test independently from implementation intent. Use run_shell if needed.",
             "Return what was tested, evidence, failures, and residual risk. Do not ask the implementer for clarification."
@@ -811,10 +812,12 @@ export async function processTask(taskId: string, signal?: AbortSignal): Promise
 
       updateTask(taskId, { status: "verifying" });
       const verifierWorkspace = implementerWorkspace;
+      const verifierRules = conventionRuleBrief(projectPath, "verifier");
       const verifierPrompt = [
         taskBrief(refreshedTask, round, brokerBrief, scopeReferenceContext),
         `Your assigned verifier workspace: ${verifierWorkspace.path}`,
         verifierWorkspace.branchName ? `Your branch: ${verifierWorkspace.branchName}` : "",
+        verifierRules ? `Apply these verifier rules:\n${verifierRules}` : "",
         "This verifier stage reuses the clean implementation worktree instead of creating another role worktree.",
         `Broker evidence pack:\n${evidencePack}`,
         `Broker implementation brief:\n${implementationBrief}`,

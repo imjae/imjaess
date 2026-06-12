@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { createConventionNote, listConventionNotes } from "@/lib/db";
+import { createConventionNote, listConventionNotes, updateConventionNote } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
 const noteSchema = z.object({
   projectPath: z.string().min(1),
-  ruleTarget: z.enum(["research_planning", "implementation"]).default("implementation"),
+  ruleTarget: z.string().optional(),
+  agentTargets: z.array(z.enum(["researcher", "planner", "implementer", "tester", "verifier"])).min(1).optional(),
   category: z.string().min(1),
   rule: z.string().min(1),
   reason: z.string().default(""),
@@ -25,4 +26,13 @@ export async function POST(request: Request): Promise<NextResponse> {
   const body = noteSchema.parse(await request.json());
   const note = createConventionNote(body);
   return NextResponse.json({ note }, { status: 201 });
+}
+
+export async function PATCH(request: Request): Promise<NextResponse> {
+  const body = noteSchema.extend({ id: z.string().min(1) }).parse(await request.json());
+  const note = updateConventionNote(body);
+  if (!note) {
+    return NextResponse.json({ error: "Rule not found." }, { status: 404 });
+  }
+  return NextResponse.json({ note });
 }

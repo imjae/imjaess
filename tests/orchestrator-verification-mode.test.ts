@@ -150,11 +150,11 @@ describe("orchestrator verification modes", () => {
     expect(finalBrief?.contract?.acceptanceCriteriaStatus.some((criterion) => criterion.status === "fail")).toBe(true);
   });
 
-  it("applies research/planning and implementation rules to the matching agents", async () => {
+  it("applies convention rules to the selected agents", async () => {
     const root = createGitRepo();
     createConventionNote({
       projectPath: root,
-      ruleTarget: "research_planning",
+      agentTargets: ["researcher"],
       category: "Agent flow",
       rule: "계획 전에 실제 코드 흐름을 먼저 확인한다.",
       reason: "",
@@ -164,9 +164,19 @@ describe("orchestrator verification modes", () => {
     });
     createConventionNote({
       projectPath: root,
-      ruleTarget: "implementation",
+      agentTargets: ["implementer"],
       category: "Code",
       rule: "구현 변경은 확인된 파일로 좁게 제한한다.",
+      reason: "",
+      source: "manual",
+      confidence: "high",
+      examples: ""
+    });
+    createConventionNote({
+      projectPath: root,
+      agentTargets: ["verifier"],
+      category: "Review",
+      rule: "Verifier-specific rule",
       reason: "",
       source: "manual",
       confidence: "high",
@@ -191,6 +201,7 @@ describe("orchestrator verification modes", () => {
     expect(detail?.agentRuns.find((run) => run.role === "implementer")?.input).toContain(
       "구현 변경은 확인된 파일로 좁게 제한한다."
     );
+    expect(detail?.agentRuns.find((run) => run.role === "verifier")?.input).toContain("Verifier-specific rule");
   });
 
   it("pauses plan-mode tasks for user answers before implementation", async () => {
