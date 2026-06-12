@@ -177,6 +177,7 @@ export interface ConventionNote {
   projectPath: string;
   ruleTarget: string;
   agentTargets: AgentRole[];
+  taskTags: string[];
   category: string;
   rule: string;
   reason: string;

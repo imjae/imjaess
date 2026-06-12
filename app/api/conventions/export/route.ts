@@ -34,6 +34,7 @@ function renderConventions(projectPath: string): { agents: string; conventions: 
         "",
         ...categoryNotes.flatMap((note) => [
           `- ${note.rule}`,
+          `  - Task tags: ${note.taskTags.length > 0 ? note.taskTags.join(", ") : "always"}`,
           note.reason ? `  - Reason: ${note.reason}` : "",
           note.examples ? `  - Examples: ${note.examples}` : "",
           `  - Source: ${note.source}; confidence: ${note.confidence}`,

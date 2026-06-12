@@ -225,6 +225,7 @@ function migrate(database: DatabaseType): void {
       id TEXT PRIMARY KEY,
       project_path TEXT NOT NULL,
       rule_target TEXT NOT NULL DEFAULT 'implementation',
+      task_tags TEXT NOT NULL DEFAULT '',
       category TEXT NOT NULL,
       rule TEXT NOT NULL,
       reason TEXT NOT NULL,
@@ -242,6 +243,9 @@ function migrate(database: DatabaseType): void {
   const conventionNoteColumns = database.prepare("PRAGMA table_info(convention_notes)").all() as Array<{ name: string }>;
   if (!conventionNoteColumns.some((column) => column.name === "rule_target")) {
     database.exec("ALTER TABLE convention_notes ADD COLUMN rule_target TEXT NOT NULL DEFAULT 'implementation';");
+  }
+  if (!conventionNoteColumns.some((column) => column.name === "task_tags")) {
+    database.exec("ALTER TABLE convention_notes ADD COLUMN task_tags TEXT NOT NULL DEFAULT '';");
   }
   const agentRunColumnNames = new Set(
     (database.prepare("PRAGMA table_info(agent_runs)").all() as Array<{ name: string }>).map((column) => column.name)
@@ -495,6 +499,14 @@ function serializeConventionAgentTargets(input: {
   return input.ruleTarget || "implementer";
 }
 
+function serializeConventionTaskTags(tags: string[] | undefined): string {
+  return normalizeTaskTags(tags || []).join(",");
+}
+
+function parseConventionTaskTags(value: unknown): string[] {
+  return normalizeTaskTags(String(value || "").split(","));
+}
+
 function mapBrokerArtifact(row: Record<string, unknown>): BrokerArtifact {
   return {
     id: String(row.id),
@@ -551,6 +563,7 @@ function mapConvention(row: Record<string, unknown>): ConventionNote {
     projectPath: String(row.project_path),
     ruleTarget,
     agentTargets: normalizeConventionAgentTargets(ruleTarget),
+    taskTags: parseConventionTaskTags(row.task_tags),
     category: String(row.category),
     rule: String(row.rule),
     reason: String(row.reason),
@@ -1309,16 +1322,19 @@ export function getBrokerArtifact(
   return row ? mapBrokerArtifact(row) : null;
 }
 
-export function createConventionNote(input: Omit<ConventionNote, "id" | "createdAt" | "updatedAt" | "ruleTarget" | "agentTargets"> & {
+export function createConventionNote(input: Omit<ConventionNote, "id" | "createdAt" | "updatedAt" | "ruleTarget" | "agentTargets" | "taskTags"> & {
   ruleTarget?: string;
   agentTargets?: AgentRole[];
+  taskTags?: string[];
 }): ConventionNote {
   const timestamp = nowIso();
   const ruleTarget = serializeConventionAgentTargets(input);
+  const taskTags = serializeConventionTaskTags(input.taskTags);
   const note: ConventionNote = {
     ...input,
     ruleTarget,
     agentTargets: normalizeConventionAgentTargets(ruleTarget),
+    taskTags: parseConventionTaskTags(taskTags),
     id: randomUUID(),
     createdAt: timestamp,
     updatedAt: timestamp
@@ -1326,13 +1342,14 @@ export function createConventionNote(input: Omit<ConventionNote, "id" | "created
   getDb()
     .prepare(
       `INSERT INTO convention_notes
-      (id, project_path, rule_target, category, rule, reason, source, confidence, examples, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      (id, project_path, rule_target, task_tags, category, rule, reason, source, confidence, examples, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       note.id,
       note.projectPath,
       ruleTarget,
+      taskTags,
       note.category,
       note.rule,
       note.reason,
@@ -1350,6 +1367,7 @@ export function updateConventionNote(input: {
   projectPath: string;
   ruleTarget?: string;
   agentTargets?: AgentRole[];
+  taskTags?: string[];
   category: string;
   rule: string;
   reason: string;
@@ -1359,15 +1377,17 @@ export function updateConventionNote(input: {
 }): ConventionNote | null {
   const timestamp = nowIso();
   const ruleTarget = serializeConventionAgentTargets(input);
+  const taskTags = serializeConventionTaskTags(input.taskTags);
   const result = getDb()
     .prepare(
       `UPDATE convention_notes
-      SET project_path = ?, rule_target = ?, category = ?, rule = ?, reason = ?, source = ?, confidence = ?, examples = ?, updated_at = ?
+      SET project_path = ?, rule_target = ?, task_tags = ?, category = ?, rule = ?, reason = ?, source = ?, confidence = ?, examples = ?, updated_at = ?
       WHERE id = ?`
     )
     .run(
       input.projectPath,
       ruleTarget,
+      taskTags,
       input.category,
       input.rule,
       input.reason,

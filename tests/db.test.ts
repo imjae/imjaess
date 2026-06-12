@@ -170,6 +170,7 @@ describe("task persistence", () => {
     const note = createConventionNote({
       projectPath: "C:\\repo",
       agentTargets: ["researcher"],
+      taskTags: ["VFX"],
       category: "VFX",
       rule: "Check the effect pool first.",
       reason: "",
@@ -182,6 +183,7 @@ describe("task persistence", () => {
       id: note.id,
       projectPath: "C:\\repo",
       agentTargets: ["implementer", "verifier"],
+      taskTags: ["Combat", "VFX"],
       category: "Effect / VFX",
       rule: "Trace the runtime effect path before editing assets.",
       reason: "Assets can exist without being registered in a pool.",
@@ -193,13 +195,15 @@ describe("task persistence", () => {
     expect(updated).toMatchObject({
       id: note.id,
       agentTargets: ["implementer", "verifier"],
+      taskTags: ["Combat", "VFX"],
       category: "Effect / VFX",
       rule: "Trace the runtime effect path before editing assets.",
       confidence: "high"
     });
     expect(listConventionNotes("C:\\repo")[0]).toMatchObject({
       id: note.id,
-      agentTargets: ["implementer", "verifier"]
+      agentTargets: ["implementer", "verifier"],
+      taskTags: ["Combat", "VFX"]
     });
   });
 

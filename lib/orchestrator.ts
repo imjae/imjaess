@@ -89,8 +89,13 @@ function taskBrief(task: Task, round: number, brokerBrief: string, scopeReferenc
     .join("\n\n");
 }
 
-function conventionRuleBrief(projectPath: string, role: AgentRole): string {
-  const notes = listConventionNotes(path.resolve(projectPath)).filter((note) => note.agentTargets.includes(role));
+function conventionRuleBrief(projectPath: string, role: AgentRole, taskTags: string[]): string {
+  const taskTagSet = new Set(taskTags);
+  const notes = listConventionNotes(path.resolve(projectPath)).filter(
+    (note) =>
+      note.agentTargets.includes(role) &&
+      (note.taskTags.length === 0 || note.taskTags.some((tag) => taskTagSet.has(tag)))
+  );
   if (notes.length === 0) {
     return "";
   }
@@ -507,9 +512,9 @@ export async function processTask(taskId: string, signal?: AbortSignal): Promise
       const existingPlanQuestions = isPlanModeFirstRound ? getBrokerArtifact(taskId, round, "plan_questions") : null;
       const planAnswer = isPlanModeFirstRound ? getBrokerArtifact(taskId, round, "plan_answer") : null;
       let planQuestions = brokerArtifactHandoff(existingPlanQuestions);
-      const researcherRules = conventionRuleBrief(projectPath, "researcher");
-      const plannerRules = isPlanModeFirstRound ? conventionRuleBrief(projectPath, "planner") : "";
-      const implementationRules = conventionRuleBrief(projectPath, "implementer");
+      const researcherRules = conventionRuleBrief(projectPath, "researcher", refreshedTask.tags);
+      const plannerRules = isPlanModeFirstRound ? conventionRuleBrief(projectPath, "planner", refreshedTask.tags) : "";
+      const implementationRules = conventionRuleBrief(projectPath, "implementer", refreshedTask.tags);
       const researcherWorkspace =
         existingEvidencePack || implementationBaseRef === "HEAD"
           ? {
@@ -777,7 +782,7 @@ export async function processTask(taskId: string, signal?: AbortSignal): Promise
 
       let testResult = "";
       if (testerWorkspace) {
-        const testerRules = conventionRuleBrief(projectPath, "tester");
+        const testerRules = conventionRuleBrief(projectPath, "tester", refreshedTask.tags);
         const testerOutput = await runRole({
           task: refreshedTask,
           role: "tester",
@@ -812,7 +817,7 @@ export async function processTask(taskId: string, signal?: AbortSignal): Promise
 
       updateTask(taskId, { status: "verifying" });
       const verifierWorkspace = implementerWorkspace;
-      const verifierRules = conventionRuleBrief(projectPath, "verifier");
+      const verifierRules = conventionRuleBrief(projectPath, "verifier", refreshedTask.tags);
       const verifierPrompt = [
         taskBrief(refreshedTask, round, brokerBrief, scopeReferenceContext),
         `Your assigned verifier workspace: ${verifierWorkspace.path}`,

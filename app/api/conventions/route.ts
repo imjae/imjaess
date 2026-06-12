@@ -8,6 +8,7 @@ const noteSchema = z.object({
   projectPath: z.string().min(1),
   ruleTarget: z.string().optional(),
   agentTargets: z.array(z.enum(["researcher", "planner", "implementer", "tester", "verifier"])).min(1).optional(),
+  taskTags: z.array(z.string()).optional().default([]),
   category: z.string().min(1),
   rule: z.string().min(1),
   reason: z.string().default(""),

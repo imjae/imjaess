@@ -131,6 +131,8 @@ const UI_TEXT = {
     refreshTasks: "Refresh tasks",
     round: "Round",
     rule: "Rule",
+    ruleTags: "Rule tags",
+    globalRule: "Always",
     editRule: "Edit",
     cancelEdit: "Cancel edit",
     updateRule: "Update rule",
@@ -908,7 +910,9 @@ export default function HomePage(): React.ReactElement {
     reason: "",
     source: "manual",
     confidence: "medium" as ConventionNote["confidence"],
-    examples: ""
+    examples: "",
+    taskTags: [] as string[],
+    ruleTagInput: ""
   });
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
 
@@ -1644,13 +1648,44 @@ export default function HomePage(): React.ReactElement {
   async function submitNote(event: FormEvent): Promise<void> {
     event.preventDefault();
     setError(null);
+    const taskTags = normalizeTaskTags([...noteForm.taskTags, noteForm.ruleTagInput]);
+    const payload = {
+      projectPath: noteForm.projectPath,
+      agentTargets: noteForm.agentTargets,
+      taskTags,
+      category: noteForm.category,
+      rule: noteForm.rule,
+      reason: noteForm.reason,
+      source: noteForm.source,
+      confidence: noteForm.confidence,
+      examples: noteForm.examples
+    };
     await jsonFetch("/api/conventions", {
       method: editingNoteId ? "PATCH" : "POST",
-      body: JSON.stringify(editingNoteId ? { ...noteForm, id: editingNoteId } : noteForm)
+      body: JSON.stringify(editingNoteId ? { ...payload, id: editingNoteId } : payload)
     });
     setEditingNoteId(null);
-    setNoteForm((current) => ({ ...current, rule: "", reason: "", examples: "" }));
+    setNoteForm((current) => ({ ...current, rule: "", reason: "", examples: "", taskTags: [], ruleTagInput: "" }));
     await refreshNotes();
+  }
+
+  function addRuleTag(tag?: string): void {
+    const value = (tag || noteForm.ruleTagInput).trim();
+    if (!value) {
+      return;
+    }
+    setNoteForm((current) => ({
+      ...current,
+      taskTags: normalizeTaskTags([...current.taskTags, value]),
+      ruleTagInput: ""
+    }));
+  }
+
+  function removeRuleTag(tag: string): void {
+    setNoteForm((current) => ({
+      ...current,
+      taskTags: current.taskTags.filter((item) => item !== tag)
+    }));
   }
 
   function editNote(note: ConventionNote): void {
@@ -1663,13 +1698,15 @@ export default function HomePage(): React.ReactElement {
       reason: note.reason,
       source: note.source,
       confidence: note.confidence,
-      examples: note.examples
+      examples: note.examples,
+      taskTags: note.taskTags,
+      ruleTagInput: ""
     });
   }
 
   function cancelNoteEdit(): void {
     setEditingNoteId(null);
-    setNoteForm((current) => ({ ...current, rule: "", reason: "", examples: "" }));
+    setNoteForm((current) => ({ ...current, rule: "", reason: "", examples: "", taskTags: [], ruleTagInput: "" }));
   }
 
   async function exportConventions(writeFiles: boolean): Promise<void> {
@@ -2057,6 +2094,9 @@ export default function HomePage(): React.ReactElement {
                 submitNote={submitNote}
                 editNote={editNote}
                 cancelNoteEdit={cancelNoteEdit}
+                addRuleTag={addRuleTag}
+                removeRuleTag={removeRuleTag}
+                knownTaskTags={knownTaskTags}
                 exportConventions={exportConventions}
                 exportPreview={exportPreview}
               />
@@ -2217,6 +2257,9 @@ export default function HomePage(): React.ReactElement {
               submitNote={submitNote}
               editNote={editNote}
               cancelNoteEdit={cancelNoteEdit}
+              addRuleTag={addRuleTag}
+              removeRuleTag={removeRuleTag}
+              knownTaskTags={knownTaskTags}
               exportConventions={exportConventions}
               exportPreview={exportPreview}
               followUpMessage={followUpMessage}
@@ -2229,7 +2272,6 @@ export default function HomePage(): React.ReactElement {
                 setSelectedTaskId(taskId);
                 setDetailModalOpen(true);
               }}
-              knownTaskTags={knownTaskTags}
               updateTaskTags={updateTaskTags}
               deleteTaskTag={deleteGlobalTaskTag}
               plannerQuestions={plannerQuestions}
@@ -2871,6 +2913,8 @@ function TaskDetailView(props: {
     source: string;
     confidence: ConventionNote["confidence"];
     examples: string;
+    taskTags: string[];
+    ruleTagInput: string;
   };
   setNoteForm: React.Dispatch<React.SetStateAction<{
     projectPath: string;
@@ -2881,11 +2925,16 @@ function TaskDetailView(props: {
     source: string;
     confidence: ConventionNote["confidence"];
     examples: string;
+    taskTags: string[];
+    ruleTagInput: string;
   }>>;
   editingNoteId: string | null;
   submitNote: (event: FormEvent) => Promise<void>;
   editNote: (note: ConventionNote) => void;
   cancelNoteEdit: () => void;
+  addRuleTag: (tag?: string) => void;
+  removeRuleTag: (tag: string) => void;
+  knownTaskTags: string[];
   exportConventions: (writeFiles: boolean) => Promise<void>;
   exportPreview: string;
   followUpMessage: string;
@@ -2895,7 +2944,6 @@ function TaskDetailView(props: {
   uploadAttachments: (files: File[]) => Promise<void>;
   isUploadingAttachment: boolean;
   selectTask: (taskId: string) => void;
-  knownTaskTags: string[];
   updateTaskTags: (taskId: string, tags: string[]) => Promise<void>;
   deleteTaskTag: (tag: string) => Promise<void>;
   plannerQuestions: BrokerArtifact | null;
@@ -3142,6 +3190,9 @@ function TaskDetailView(props: {
             submitNote={props.submitNote}
             editNote={props.editNote}
             cancelNoteEdit={props.cancelNoteEdit}
+            addRuleTag={props.addRuleTag}
+            removeRuleTag={props.removeRuleTag}
+            knownTaskTags={props.knownTaskTags}
             exportConventions={props.exportConventions}
             exportPreview={props.exportPreview}
           />
@@ -3180,6 +3231,14 @@ function AppliedRulesPanel(props: {
                 <span>{note.category}</span>
                 <span>{confidenceLabel(note.confidence, props.language)}</span>
               </header>
+              <div className="tag-row" aria-label={tr(props.language, "ruleTags")}>
+                {note.taskTags.length === 0 ? <span className="pill group">{tr(props.language, "globalRule")}</span> : null}
+                {note.taskTags.map((tag) => (
+                  <span className="task-tag active" key={tag}>
+                    {tag}
+                  </span>
+                ))}
+              </div>
               <p>{note.rule}</p>
               {note.reason ? <small>{note.reason}</small> : null}
               {note.examples ? <pre>{note.examples}</pre> : null}
@@ -3496,6 +3555,8 @@ function ConventionPanel(props: {
     source: string;
     confidence: ConventionNote["confidence"];
     examples: string;
+    taskTags: string[];
+    ruleTagInput: string;
   };
   setForm: React.Dispatch<React.SetStateAction<{
     projectPath: string;
@@ -3506,11 +3567,16 @@ function ConventionPanel(props: {
     source: string;
     confidence: ConventionNote["confidence"];
     examples: string;
+    taskTags: string[];
+    ruleTagInput: string;
   }>>;
   editingNoteId: string | null;
   submitNote: (event: FormEvent) => Promise<void>;
   editNote: (note: ConventionNote) => void;
   cancelNoteEdit: () => void;
+  addRuleTag: (tag?: string) => void;
+  removeRuleTag: (tag: string) => void;
+  knownTaskTags: string[];
   exportConventions: (writeFiles: boolean) => Promise<void>;
   exportPreview: string;
 }): React.ReactElement {
@@ -3520,6 +3586,7 @@ function ConventionPanel(props: {
   const confidenceId = `${props.idPrefix}-confidence`;
   const reasonId = `${props.idPrefix}-reason`;
   const examplesId = `${props.idPrefix}-examples`;
+  const ruleTagId = `${props.idPrefix}-rule-tag`;
   return (
     <div className="detail-grid">
       <form className="form-grid" onSubmit={(event) => void props.submitNote(event)}>
@@ -3569,6 +3636,48 @@ function ConventionPanel(props: {
               </label>
             ))}
           </div>
+        </div>
+        <div className="field">
+          <label htmlFor={ruleTagId}>{tr(props.language, "ruleTags")}</label>
+          <div className="tag-input-row">
+            <input
+              id={ruleTagId}
+              value={props.form.ruleTagInput}
+              onChange={(event) => props.setForm((current) => ({ ...current, ruleTagInput: event.target.value }))}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  props.addRuleTag();
+                }
+              }}
+              placeholder={props.language === "ko" ? "비워두면 항상 적용" : "Leave empty to always apply"}
+            />
+            <button className="btn" type="button" onClick={() => props.addRuleTag()}>
+              {props.language === "ko" ? "태그 추가" : "Add tag"}
+            </button>
+          </div>
+          <div className="tag-row" aria-label={tr(props.language, "ruleTags")}>
+            {props.form.taskTags.length === 0 ? <span className="pill group">{tr(props.language, "globalRule")}</span> : null}
+            {props.form.taskTags.map((tag) => (
+              <button className="task-tag active" key={tag} type="button" onClick={() => props.removeRuleTag(tag)}>
+                {tag}
+              </button>
+            ))}
+          </div>
+          {props.knownTaskTags.length > 0 ? (
+            <div className="tag-row" aria-label={props.language === "ko" ? "기존 Task 태그" : "Existing task tags"}>
+              {props.knownTaskTags.map((tag) => (
+                <button
+                  className={`task-tag ${props.form.taskTags.includes(tag) ? "active" : ""}`}
+                  key={tag}
+                  type="button"
+                  onClick={() => (props.form.taskTags.includes(tag) ? props.removeRuleTag(tag) : props.addRuleTag(tag))}
+                >
+                  {tag}
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
         <div className="split">
           <div className="field">
@@ -3646,6 +3755,14 @@ function ConventionPanel(props: {
                 </span>
                 <span>{note.source}</span>
               </header>
+              <div className="tag-row" aria-label={tr(props.language, "ruleTags")}>
+                {note.taskTags.length === 0 ? <span className="pill group">{tr(props.language, "globalRule")}</span> : null}
+                {note.taskTags.map((tag) => (
+                  <span className="task-tag active" key={tag}>
+                    {tag}
+                  </span>
+                ))}
+              </div>
               <pre>{[note.rule, note.reason, note.examples].filter(Boolean).join("\n\n")}</pre>
               <div className="button-row">
                 <button className="btn" type="button" onClick={() => props.editNote(note)}>

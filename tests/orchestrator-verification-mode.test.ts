@@ -175,6 +175,7 @@ describe("orchestrator verification modes", () => {
     createConventionNote({
       projectPath: root,
       agentTargets: ["verifier"],
+      taskTags: ["VFX"],
       category: "Review",
       rule: "Verifier-specific rule",
       reason: "",
@@ -182,8 +183,20 @@ describe("orchestrator verification modes", () => {
       confidence: "high",
       examples: ""
     });
+    createConventionNote({
+      projectPath: root,
+      agentTargets: ["verifier"],
+      taskTags: ["UI"],
+      category: "Review",
+      rule: "UI-only verifier rule",
+      reason: "",
+      source: "manual",
+      confidence: "high",
+      examples: ""
+    });
     const task = createTask({
       title: "Rule-guided task",
+      taskTags: ["VFX"],
       goal: "Apply rules",
       scope: "",
       targetProjectPath: root,
@@ -202,6 +215,7 @@ describe("orchestrator verification modes", () => {
       "구현 변경은 확인된 파일로 좁게 제한한다."
     );
     expect(detail?.agentRuns.find((run) => run.role === "verifier")?.input).toContain("Verifier-specific rule");
+    expect(detail?.agentRuns.find((run) => run.role === "verifier")?.input).not.toContain("UI-only verifier rule");
   });
 
   it("pauses plan-mode tasks for user answers before implementation", async () => {
